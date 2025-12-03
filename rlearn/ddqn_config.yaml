@@ -1,0 +1,11 @@
+beta_start: 0.4
+beta_frames: 1000
+gamma_start: 0.1
+gamma_final: 0.99
+epsilon_start: 1.0
+epsilon_final: 0.01
+epsilon_decay: 1000
+
+lenBuffer: 2000
+num_steps: 5000
+batchsize: 100
