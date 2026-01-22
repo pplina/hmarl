@@ -4,13 +4,13 @@ import gym_examples
 import argparse
 import numpy as np
 import torch
-import torch.optim as optim
-import torch.nn as nn
+#import torch.optim as optim
+#import torch.nn as nn
 import os
 import random
 import datetime
 import sys
-import networkx as nx
+#import networkx as nx
 import time
 import json
 from pathlib import Path
@@ -20,13 +20,11 @@ import ray
 from ray import tune
 from ray.rllib.algorithms.ppo import PPO
 from ray.rllib.algorithms.dqn import DQN
+from ray.rllib.algorithms.ppo import PPOConfig
+from ray.rllib.algorithms.dqn import DQNConfig
 from ray.tune.registry import register_env
 from ray.rllib.utils.framework import try_import_torch
 from ray.tune.logger import UnifiedLogger
-#from ray.tune.result import DEFAULT_RESULTS_DIR
-
-from ray.rllib.algorithms.ppo import PPOConfig
-from ray.rllib.algorithms.dqn import DQNConfig
 from ray.rllib.core.rl_module.rl_module import RLModuleSpec
 from ray.rllib.core.rl_module.default_model_config import DefaultModelConfig
 from ray.rllib.utils.metrics import (
@@ -36,12 +34,16 @@ from ray.rllib.utils.metrics import (
     NUM_ENV_STEPS_SAMPLED_LIFETIME,
 )
 
+from ray.rllib.env.wrappers.pettingzoo_env import PettingZooEnv
+from pettingzoo import AECEnv
+from pettingzoo.utils import agent_selector, wrappers
+from pettingzoo.utils.conversions import parallel_wrapper_fn
+
 
 """
 sys.path.append("./rlearn/rlearn/")
 
 """
-
 
 #ENVIRONMENT = "MountainCar"
 ENVIRONMENT = "NEWCerere"
@@ -67,6 +69,7 @@ def custom_logger_creator(custom_path, custom_str=""):
         return UnifiedLogger(config, logdir, loggers=None)
     
     return logger_creator
+
 
 ###### Test Begin
 def test(n_episodes, env_name, scenario_name, rwf):
@@ -164,10 +167,19 @@ def eval_model(env_name, scenario_name, path2tar, rwf):
                         "vf_share_layers": True,
                     },
                  )
+                 # old api stack
+#                .api_stack(enable_rl_module_and_learner=False, enable_env_runner_and_connector_v2=False)
+#                .rl_module(
+#                    model_config=DefaultModelConfig(
+#                    fcnet_hiddens=[256,256],
+#                    fcnet_activation="relu",
+#                    vf_share_layers=True,
+#                    ),
+#                 ) 
                 .evaluation(
                     evaluation_interval=9999999999,
                     evaluation_duration_unit="episodes",
-                    evaluation_duration=3,
+                    evaluation_duration=1,
                     evaluation_config={"explore": False},
                 )        
             )
@@ -205,9 +217,9 @@ def eval_model(env_name, scenario_name, path2tar, rwf):
         results = model.evaluate()
         print(f"Reward mean: {results[ENV_RUNNER_RESULTS][EPISODE_RETURN_MEAN]}")
         print(results)
-        env.close()
-        
+        env.close()   
 ###### Eval End
+
 
 ###### Train Begin
 def train_model(iterations, stop_rw, env_name, scenario_name, path2tar, rwf):
@@ -250,52 +262,6 @@ def train_model(iterations, stop_rw, env_name, scenario_name, path2tar, rwf):
         model = DQN(config=dqn_config, logger_creator=custom_logger_creator(tmp_path, "dqn_mountaincar"))
         print("Print DQN model")
         print(model.get_config().model)
-        """
-        config2 = (
-             DQNConfig()
-             .environment(env="MountainCar-v0")
-#             .api_stack(
-#                 enable_env_runner_and_connector_v2=False,
-#                 enable_rl_module_and_learner=False,
-#             )
-             .training(
-#                 num_epochs= 8,
-                 train_batch_size = 1000,
-                 lr=0.0005,
-                 gamma=0.99,
-                 replay_buffer_config = {
-                     "type": "EpisodeReplayBuffer",
-                     "capacity": 50000,
-                 },
-
-#                 replay_buffer_config={
-#                     "type": "MultiAgentPrioritizedReplayBuffer",
-#                     "prioritized_replay_alpha": 0.6, 
-#                     "prioritized_replay_beta": 0.4, 
-#                     "prioritized_replay_eps": 1e-6,
-#                     "capacity": 50000,
-#                     "alpha": 0.6,
-#                     "beta": 0.4,
-#                 },
-
-                 model={
-                        "fcnet_hiddens": [128],
-                        "fcnet_activation": "linear",
-                        "vf_share_layers": True,
-                 },
-                 epsilon=[(0, 1.0), (100000, 0.02)],
-             )
-             .env_runners(
-                 num_env_runners=0
-             )
-             .debugging(log_level="ERROR", logger_creator=custom_logger_creator(tmp_path, "dqn_mcar"))
-             .framework(framework="torch")
-             
-        )
-        model = config2.build_algo()
-        print("Print DQN model")
-        print(model.get_config().model)
-        """
         # Train the model
         for i in range(iterations):  
             result = model.train()
@@ -334,6 +300,7 @@ def train_model(iterations, stop_rw, env_name, scenario_name, path2tar, rwf):
         
         if is_ppo:
             # Configure PPO for the CERERE environment
+            """
             config = {
                 "env": "CERERE-v0",
                 "framework": "torch",
@@ -360,19 +327,14 @@ def train_model(iterations, stop_rw, env_name, scenario_name, path2tar, rwf):
             #  Make PPO
             model = PPO(config=config, logger_creator=custom_logger_creator(tmp_path, "ppo_cerere"))
             """
-            config2 = (
+            config = (
                 PPOConfig()
                 .environment(env="CERERE-v0")
                 .resources(
                     num_gpus=int(os.environ.get("RLLIB_NUM_GPUS", "0"))
                 )
-                .api_stack(
-                    enable_env_runner_and_connector_v2=False,
-                    enable_rl_module_and_learner=False,
-                )
-                .training(
-                    num_epochs= 8,
-                    train_batch_size = 500,
+                 .training(
+                    train_batch_size = 1000,
                     lr=0.0003,
                     gamma=0.99,
                     clip_param=0.2,
@@ -380,30 +342,32 @@ def train_model(iterations, stop_rw, env_name, scenario_name, path2tar, rwf):
                     vf_loss_coeff=0.25,
                     kl_coeff = 0.005,  
                     model={
-                        "fcnet_hiddens": [256,256],
+                       "fcnet_hiddens": [256,256],
                         "fcnet_activation": "relu",
                         "vf_share_layers": True,
-                    },
+                   },
                 )
                 .env_runners(
                     num_env_runners=0
                 )
-#                .rl_module(
+                # old api stack
+#                .api_stack(enable_rl_module_and_learner=False, enable_env_runner_and_connector_v2=False)
+#                .rl_module( 
 #                    model_config=DefaultModelConfig(
 #                    fcnet_hiddens=[256,256],
 #                    fcnet_activation="relu",
 #                    vf_share_layers=True,
-#                    ),
+#                   ),
 #                 ) 
                 .debugging(log_level="ERROR", logger_creator=custom_logger_creator(tmp_path, "ppo_cerere"))
                 .framework(framework="torch")
                 .resources(num_gpus=int(os.environ.get("RLLIB_NUM_GPUS", "0")))
             )
             #  Make PPO
-            model = config2.build_algo()
-            """
+            model = config.build()
             print("Print PPO model")
-            print(model.get_config().model)           
+            print(model.get_config().model)
+            #exit()         
         else:
             # Configure DQN for CERERE environment
             config = {
@@ -453,8 +417,87 @@ def train_model(iterations, stop_rw, env_name, scenario_name, path2tar, rwf):
         if not os.path.exists(os.path.dirname(path2tar)):
             os.makedirs(os.path.dirname(path2tar), exist_ok=True)
         model.save(path2tar)
-
+        env.close()
 ###### Train End
+
+
+###### Train with Tune Begin
+def train_model_with_tune(iterations, stop_rw, env_name, scenario_name, path2tar, rwf):
+    if env_name == "NewCerere":
+       env = gymnasium.make('gym_examples/CERERE-v0', render_mode=None, rw_func=rwf, scenario=scenario_name)
+       # Register the environment with Ray
+       register_env("CERERE-v0", lambda config: env)
+
+       # Set up logging directory
+       tmp_path = "./tb_log/"
+       os.makedirs(tmp_path, exist_ok=True)
+
+       config = (
+           PPOConfig()
+           .environment(env="CERERE-v0")
+           .resources(
+               num_gpus=int(os.environ.get("RLLIB_NUM_GPUS", "0"))
+           )
+           .training(
+               train_batch_size = 1000,
+               lr=0.0003,
+               gamma=0.99,
+               clip_param=0.2,
+               entropy_coeff = 0.02,     
+               vf_loss_coeff=0.25,
+               kl_coeff = 0.005,  
+               model={
+                   "fcnet_hiddens": [256,256],
+                   "fcnet_activation": "relu",
+                  "vf_share_layers": True,
+               },
+          )
+          # old api stack
+#          .api_stack(enable_rl_module_and_learner=False, enable_env_runner_and_connector_v2=False)
+#          .rl_module(
+#               model_config=DefaultModelConfig(
+#                    fcnet_hiddens=[256,256],
+#                    fcnet_activation="relu",
+#                    vf_share_layers=True,
+#               ),
+#          ) 
+          .debugging(log_level="ERROR", logger_creator=custom_logger_creator(tmp_path, "ppo_cerere"))
+          .framework(framework="torch")
+       )
+
+       stop = {"num_env_steps_sampled_lifetime": iterations, "env_runners/episode_return_mean": stop_rw} ##0.64 ent, 0.83 mil
+
+       # Initialize Ray if not already done
+       if not ray.is_initialized():
+           ray.init(
+               num_gpus=int(torch.cuda.is_available()),           
+               num_cpus=6,
+               include_dashboard=False,
+               ignore_reinit_error=True,
+               log_to_driver=False,
+           )
+       # execute training 
+       analysis = ray.tune.run(
+           "PPO",
+           config=config,
+           stop=stop,
+           metric="env_runners/episode_return_mean",
+           mode="max",
+          checkpoint_at_end=True,
+       )
+       env.close()
+       print("###### Analysis Train with Tune ######")
+       #print(analysis.best_result)
+       #print(analysis.get_best_trial(metric="env_runners/episode_return_mean", mode="max"))
+       #print(analysis.get_best_trial(metric="env_runners/episode_return_mean", mode="max").checkpoint)
+       #print("Model path %s" % (analysis.get_best_trial(metric="env_runners/episode_return_mean", mode="max").checkpoint.path))
+       #print(analysis.get_best_trial(metric="env_runners/episode_return_mean", mode="max").config)
+       path=analysis.get_best_trial(metric="env_runners/episode_return_mean", mode="max").checkpoint.path
+       os.rename(path, path2tar)
+    else:
+        print(" Env %s not supported" %  env_name)
+###### Train with Tune Ende
+
 
 
 if __name__ == "__main__":
@@ -464,8 +507,9 @@ if __name__ == "__main__":
     parser.add_argument('--test', help="Test random action values in the spezified env", action="store_true")
     parser.add_argument('--eval', help="Eval a trained model in the specified env", action="store_true")
     parser.add_argument('--train', help="Train model in the specified env", action="store_true")
+    parser.add_argument('--trainWithTune', help="Train with ray tune model in the specified env", action="store_true")
     parser.add_argument('--iter', type=int, default=50000,
-                        help='Number of trainings steps (ent=100000/mil=100000) , default = 50000')
+                        help='Number of trainings iterations (ent=100000/mil=100000) , default = 50000')
     parser.add_argument('--stop_rw', type=float, default=0.1,
                         help='Mean reward to stop the training (ent=0.64 ent/ mil=0.83 mil), default = 0.1')
     parser.add_argument('--rwf', type=int, default=1,
@@ -506,6 +550,13 @@ if __name__ == "__main__":
         print("Train model in env %s, scenario %s" % (ENVIRONMENT, SCENARIO))
         start = datetime.datetime.now().replace(microsecond=0)
         train_model(args.iter, args.stop_rw, ENVIRONMENT, SCENARIO, path2tar, rwf)
+        end = datetime.datetime.now().replace(microsecond=0)
+        elapsed = end - start
+        print("Stop train model in env %s after %s" % (ENVIRONMENT, elapsed))
+    elif args.trainWithTune:
+        print("Train model with Tune in env %s, scenario %s" % (ENVIRONMENT, SCENARIO))
+        start = datetime.datetime.now().replace(microsecond=0)
+        train_model_with_tune(args.iter, args.stop_rw, ENVIRONMENT, SCENARIO, path2tar, rwf)
         end = datetime.datetime.now().replace(microsecond=0)
         elapsed = end - start
         print("Stop train model in env %s after %s" % (ENVIRONMENT, elapsed))

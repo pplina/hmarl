@@ -134,8 +134,8 @@ class cerere_net_v2_env(AECEnv):
         self.mystep = 0
 
         #print("Number of nodes is %d" % self.netgraph.number_of_nodes())
-        #self.possible_agents = ["player_" + str(r) for r in range(2)]
-        self.possible_agents = ["player_" + str(r) for r in range(1)]
+        self.possible_agents = ["player_" + str(r) for r in range(2)]
+        #self.possible_agents = ["player_" + str(r) for r in range(1)]
 
         # optional: a mapping between agent name and ID
         self.agent_name_mapping = dict(
@@ -306,6 +306,7 @@ class cerere_net_v2_env(AECEnv):
         
         #my_truncated = False
         #my_terminated = False
+        reward = 0
 
         if ( self.terminations[self.agent_selection] or self.truncations[self.agent_selection] ):
             self._was_dead_step(action)
@@ -314,40 +315,42 @@ class cerere_net_v2_env(AECEnv):
         self.state[self.agent_selection] = action
         self._cumulative_rewards[self.agent_selection] = 0
 
-        #print(self.nwstate)
-        self.mystep = self.mystep + 1
-        self.actualAction = action
-        self.nwstate, self.netgraph, pFlag, self.critserver, self.optserver, self.block_traffic = defender.getAction(self.net, self.netgraph,self.critserver, self.optserver, action, self.actionSpace, self.topology, self.nwstate, self.block_traffic)
+        if self._agent_selector.is_last():
+            print("AGENT %s do %d" % (str(self.agent_selection), action))
+            #print(self.nwstate)
+            self.mystep = self.mystep + 1
+            self.actualAction = action
+            self.nwstate, self.netgraph, pFlag, self.critserver, self.optserver, self.block_traffic = defender.getAction(self.net, self.netgraph,self.critserver, self.optserver, action, self.actionSpace, self.topology, self.nwstate, self.block_traffic)
         
-        if self.render_mode == "human":
-             self.render()
+            if self.render_mode == "human":
+                self.render()
         
-        self.nwstate = attacker.attack(self.net, self.netgraph, self.nwstate, self.critserver, self.mode, self.attackmode)
-        # reward function
-        #reward, terminated2, reachable_healthy_nodes, reachable_infected_nodes = network.getReward(self.critserver, self.optserver, self.topology, self.nwstate, pFlag, self.netgraph)
-        if self.rw_function == 2:
-            reward, terminated2, reachable_healthy_nodes, reachable_infected_nodes, self.data_ex = network.getReward3(self.critserver, self.optserver, self.topology, self.nwstate, pFlag, self.netgraph, action, self.actionSpace, self.block_traffic)
-        else:
-            reward, terminated2, reachable_healthy_nodes, reachable_infected_nodes, self.data_ex = network.getReward2(self.critserver, self.optserver, self.topology, self.nwstate, pFlag, self.netgraph, action, self.actionSpace, self.block_traffic)
-        self.actualAction = -2
-        #print(self.nwstate)
-        self.flatState = network.getVectorFromState2(self.nwstate, self.critserver, self.netgraph)
-        ##### replace # self.observation_state = np.array(self.flatState, dtype=np.float32)
+            self.nwstate = attacker.attack(self.net, self.netgraph, self.nwstate, self.critserver, self.mode, self.attackmode)
+            # reward function
+            #reward, terminated2, reachable_healthy_nodes, reachable_infected_nodes = network.getReward(self.critserver, self.optserver, self.topology, self.nwstate, pFlag, self.netgraph)
+            if self.rw_function == 2:
+                reward, terminated2, reachable_healthy_nodes, reachable_infected_nodes, self.data_ex = network.getReward3(self.critserver, self.optserver, self.topology, self.nwstate, pFlag, self.netgraph, action, self.actionSpace, self.block_traffic)
+            else:
+                reward, terminated2, reachable_healthy_nodes, reachable_infected_nodes, self.data_ex = network.getReward2(self.critserver, self.optserver, self.topology, self.nwstate, pFlag, self.netgraph, action, self.actionSpace, self.block_traffic)
+            self.actualAction = -2
+            #print(self.nwstate)
+            self.flatState = network.getVectorFromState2(self.nwstate, self.critserver, self.netgraph)
+            ##### replace # self.observation_state = np.array(self.flatState, dtype=np.float32)
  
-        if self.render_mode == "human":
-             self.render()
+            if self.render_mode == "human":
+               self.render()
 
-        for i in self.agents:
-            self.observations[i] =np.array(self.flatState, dtype=np.float32)
+            for i in self.agents:
+                self.observations[i] =np.array(self.flatState, dtype=np.float32)
 
 
-        ##### not needed # observation = self.observe()
-        ##### not needed # info = self._get_info()
-        if terminated2 == 1:
-            #self.truncations[self.agent_selection] = True
-            #my_terminated = True
-            self.truncations = {
-               agent: True for agent in self.agents
+            ##### not needed # observation = self.observe()
+            ##### not needed # info = self._get_info()
+            if terminated2 == 1:
+               #self.truncations[self.agent_selection] = True
+               #my_terminated = True
+               self.truncations = {
+                  agent: True for agent in self.agents
             }
 
 
