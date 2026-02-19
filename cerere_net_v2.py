@@ -70,6 +70,7 @@ class cerere_net_v2_env(AECEnv):
     metadata = {
         "render_modes": ["human"],
         "name": "cerere_net_v2_env",
+#        "name": "pettingzoo_cerere",
         "is_parallelizable": True
     }
 
@@ -81,6 +82,8 @@ class cerere_net_v2_env(AECEnv):
         - possible_agents
         - render_mode
         """
+        super().__init__()
+        #AECEnv.__init__(self)
         #print("#### Beginn INIT new topology ###")
         if scenario == 'enterprise':
             infected_nodes = ["s3_10", "s1_7", "s2_9"]
@@ -113,7 +116,7 @@ class cerere_net_v2_env(AECEnv):
         self.nwstate = network.getStateFromTopology(self.topology)
         #print(self.nwstate)
         self.actionSpace = defender.getactionSpace(self.nwstate, self.critserver, self.optserver, self.topology)
-        print("Action space (len {}) \n{}".format(len(self.actionSpace), self.actionSpace))
+        print("Init: Action space (len {}) \n{}".format(len(self.actionSpace), self.actionSpace))
         self.netgraph = nx.Graph()
         self.netgraph = network.createNetwork(self.net, self.netgraph, self.topology, self.mode)
         self.flatState = network.getVectorFromState2(self.nwstate, self.critserver, self.netgraph)
@@ -201,6 +204,7 @@ class cerere_net_v2_env(AECEnv):
             title = "Step " + str(self.mystep) + ": Attack"
         else:
             title = "Step " + str(self.mystep) + ": Do nothing"
+        print(title)
         plt.title(title)
         box_textstr = 'Data Ex = ' + str (self.data_ex)
         props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
@@ -308,15 +312,19 @@ class cerere_net_v2_env(AECEnv):
         #my_terminated = False
         reward = 0
 
+        #print("#### Begin STEP in pettingzoo ###")
+        #print(self.nwstate)
+
         if ( self.terminations[self.agent_selection] or self.truncations[self.agent_selection] ):
             self._was_dead_step(action)
             return
 
         self.state[self.agent_selection] = action
         self._cumulative_rewards[self.agent_selection] = 0
+        #print("AGENT %s TRY do %d" % (str(self.agent_selection), action))
 
         if self._agent_selector.is_last():
-            print("AGENT %s do %d" % (str(self.agent_selection), action))
+            #print("AGENT %s do %d" % (str(self.agent_selection), action))
             #print(self.nwstate)
             self.mystep = self.mystep + 1
             self.actualAction = action
@@ -357,7 +365,9 @@ class cerere_net_v2_env(AECEnv):
         self.rewards[self.agent_selection] = reward
         self._accumulate_rewards()
         self.agent_selection = self._agent_selector.next()
-        print("Rewards = {} Accumulate_rewards = {}".format(self.rewards, self._cumulative_rewards))
+        #print("#### End STEP in pettingzoo ###")
+        #print(self.nwstate)
+        #print("Rewards = {} Accumulate_rewards = {}".format(self.rewards, self._cumulative_rewards))
 
         """
         #old

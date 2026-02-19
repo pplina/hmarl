@@ -9,8 +9,6 @@
 - stablebaseline3
 - ray
 
-
-
 ## Setup
 1. Install the Gymnasium API
 ```
@@ -39,17 +37,17 @@ python3 test.py --eval --rwf 1  --steps 20000 --env NewCerere --scen enterprise 
 # CERERE
 ```
 No longer supported
-python3 test.py --train --env Cerere --scen military --path2tar ./rlearn/networks/targetmodel_ai_gym_mil.pt
+python3 test.py --train --env Cerere --scen military --path2tar ./rlearn/networks/targetmodel_ai_gym_mil_new.pt
 python3 test.py --eval --env Cerere --scen military --path2tar ./rlearn/networks/targetmodel_ai_gym_mil.pt
 
-python3 test.py --train -env Cerere --scen enterprise --path2tar ./rlearn/networks/targetmodel_ai_gym_ent.pt
+python3 test.py --train -env Cerere --scen enterprise --path2tar ./rlearn/networks/targetmodel_ai_gym_ent_new.pt
 python3 test.py --eval -env Cerere --scen enterprise --path2tar ./rlearn/networks/targetmodel_ai_gym_ent.pt
 ```
 
 #MountainCar
 ```
-python3 test.py --train --env NewCerere  --path2tar=./model_dqn_mountaincar.zip
-python3 test.py --eval --env NewCerere  --path2tar=./model_dqn_mountaincar.zip
+python3 test.py --train --env MountainCar  --path2tar=./dqn_mountaincar_new.zip
+python3 test.py --eval --env MountainCar  --path2tar=./dqn_mountaincar.zip
 ```
 
 
@@ -60,29 +58,42 @@ python3 test.py --eval --env NewCerere  --path2tar=./model_dqn_mountaincar.zip
 ##
 ######################################################################
 
-
 ## Setup
-1. Install the peGymnasium API
+1. Install ray
 ```
 pip3 install ray=1.50.1
 ```
 
 ## Usage
-3. To use the implementation execute the command lines below
-```
+2. To use the implementation execute the command lines below
 
+# NewCERERE
+```
 python3 testRayRL.py --train  --rwf 1  --iter 100000 --stop_rw 0.64 --env NewCerere --scen enterprise --path2tar /home/ubuntu/src/rl-test/ppo_ent_rllib_new/
-python3 testRayRL.py --eval --rwf 1  --iter 100000 --stop_rw 0.64 --env NewCerere --scen enterprise --path2tar /home/ubuntu/src/rl-test/ppo_ent_rllib5/
+python3 testRayRL.py --eval --rwf 1  --iter 100000 --stop_rw 0.64 --env NewCerere --scen enterprise --path2tar /home/ubuntu/src/rl-test/ppo_ent_rllib/
 
 
 python3 testRayRL.py --train  --rwf 1  --iter 100000 --stop_rw 0.83 --env NewCerere --scen military --path2tar /home/ubuntu/src/rl-test/ppo_mil_rllib_new/
-python3 testRayRL.py --eval  --rwf 1  --iter 100000 --stop_rw 0.83 --env NewCerere --scen military --path2tar /home/ubuntu/src/rl-test/ppo_mil_rllib5/
-
-
+python3 testRayRL.py --eval  --rwf 1  --iter 100000 --stop_rw 0.83 --env NewCerere --scen military --path2tar /home/ubuntu/src/rl-test/ppo_mil_rllib/
 ```
 
 
 
+######################################################################
+##
+## CERERE multi agent reinforcement learning with ray
+##
+######################################################################
+
+## Usage
+2. To use the implementation execute the command lines below
+
+# NewCERERE
+```
+python3 test-marl.py --train --rwf 1  --stop_rw 0.83 --iter 100000 --scen military --path2tar  /home/ubuntu/src/rl-test/ppo_mil_rllib_marl_new
+
+python3 test-marl.py --eval --rwf 1  --stop_rw 0.83 --iter 100000 --scen military --path2tar  /home/ubuntu/src/rl-test/ppo_mil_rllib_marl
+```
 
 
 

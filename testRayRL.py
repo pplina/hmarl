@@ -33,17 +33,12 @@ from ray.rllib.utils.metrics import (
     EPISODE_RETURN_MIN,
     NUM_ENV_STEPS_SAMPLED_LIFETIME,
 )
-
 from ray.rllib.env.wrappers.pettingzoo_env import PettingZooEnv
 from pettingzoo import AECEnv
 from pettingzoo.utils import agent_selector, wrappers
 from pettingzoo.utils.conversions import parallel_wrapper_fn
 
-
-"""
-sys.path.append("./rlearn/rlearn/")
-
-"""
+#sys.path.append("./rlearn/rlearn/")
 
 #ENVIRONMENT = "MountainCar"
 ENVIRONMENT = "NEWCerere"
@@ -207,12 +202,12 @@ def eval_model(env_name, scenario_name, path2tar, rwf):
             model = config_eval.build_algo()
             
         model.restore(path2tar)
-        print("Print model")
-        print(model.get_config().model)
+        #print("Print model")
+        #print(model.get_config().model)
         #exit()
         
-        print("Env observation space: {}".format(env.observation_space))
-        print("Action space: {}".format(env.action_space))
+        #print("Env observation space: {}".format(env.observation_space))
+        #print("Action space: {}".format(env.action_space))
               
         results = model.evaluate()
         print(f"Reward mean: {results[ENV_RUNNER_RESULTS][EPISODE_RETURN_MEAN]}")
@@ -330,9 +325,6 @@ def train_model(iterations, stop_rw, env_name, scenario_name, path2tar, rwf):
             config = (
                 PPOConfig()
                 .environment(env="CERERE-v0")
-                .resources(
-                    num_gpus=int(os.environ.get("RLLIB_NUM_GPUS", "0"))
-                )
                  .training(
                     train_batch_size = 1000,
                     lr=0.0003,
@@ -361,7 +353,6 @@ def train_model(iterations, stop_rw, env_name, scenario_name, path2tar, rwf):
 #                 ) 
                 .debugging(log_level="ERROR", logger_creator=custom_logger_creator(tmp_path, "ppo_cerere"))
                 .framework(framework="torch")
-                .resources(num_gpus=int(os.environ.get("RLLIB_NUM_GPUS", "0")))
             )
             #  Make PPO
             model = config.build()
@@ -370,29 +361,33 @@ def train_model(iterations, stop_rw, env_name, scenario_name, path2tar, rwf):
             #exit()         
         else:
             # Configure DQN for CERERE environment
-            config = {
-                "env": "CERERE-v0",
-                "framework": "torch",
-                "num_gpus": int(torch.cuda.is_available()),
-                "num_workers": 1,
-                "train_batch_size": 32,
-                "num_steps_sampled_before_learning_starts": 1000, 
-                "lr": 1e-3,
-                "gamma": 0.99,
-                "target_network_update_freq": 2000,
-                "replay_buffer_config": {
-                    "type": "PrioritizedEpisodeReplayBuffer",
-                    "capacity": 100000,
-                },
-                "model": {
-                    "fcnet_hiddens": [256,256],
-                    "fcnet_activation": "relu",
-                },
-                "checkpoint_frequency" : 1000,
-                "checkpoint_at_end" : True,
-            }
-            # Make DQN
-            model = DQN(config=config, logger_creator=custom_logger_creator(tmp_path, "dqn_cerere"))
+            config = (
+                DQNConfig()
+                .environment(env="CERERE-v0")
+                .training (
+                    train_batch_size = 1000,
+                    target_network_update_freq = 2000,
+                    lr=0.0003,
+                    gamma=0.99,
+                    replay_buffer_config = {
+                        "type": "PrioritizedEpisodeReplayBuffer",
+                        "capacity": 100000,
+                    },
+                    model={
+                       "fcnet_hiddens": [256,256],
+                        "fcnet_activation": "relu",
+                        "vf_share_layers": True,
+                   },
+                )
+                .env_runners(
+                    num_env_runners=0
+                )
+                .debugging(log_level="ERROR", logger_creator=custom_logger_creator(tmp_path, "ppo_cerere"))
+                .framework(framework="torch")
+            )
+            #  Make PPO
+            model = config.build()
+
             print("Print DQN model")
             print(model.get_config().model)
             
@@ -452,15 +447,6 @@ def train_model_with_tune(iterations, stop_rw, env_name, scenario_name, path2tar
                   "vf_share_layers": True,
                },
           )
-          # old api stack
-#          .api_stack(enable_rl_module_and_learner=False, enable_env_runner_and_connector_v2=False)
-#          .rl_module(
-#               model_config=DefaultModelConfig(
-#                    fcnet_hiddens=[256,256],
-#                    fcnet_activation="relu",
-#                    vf_share_layers=True,
-#               ),
-#          ) 
           .debugging(log_level="ERROR", logger_creator=custom_logger_creator(tmp_path, "ppo_cerere"))
           .framework(framework="torch")
        )
@@ -559,6 +545,6 @@ if __name__ == "__main__":
         train_model_with_tune(args.iter, args.stop_rw, ENVIRONMENT, SCENARIO, path2tar, rwf)
         end = datetime.datetime.now().replace(microsecond=0)
         elapsed = end - start
-        print("Stop train model in env %s after %s" % (ENVIRONMENT, elapsed))
+        print("Stop train model with Tune in env %s after %s" % (ENVIRONMENT, elapsed))
     else:
         print("Do not know what to do in env %s" % ENVIRONMENT)
