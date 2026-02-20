@@ -15,6 +15,25 @@ import time
 import json
 from pathlib import Path
 
+
+def _to_file_uri(path: str) -> str:
+    """Convert a local path to a file:// URI.
+
+    Ray RLlib (Ray>=2.5x) uses pyarrow fs APIs for checkpoint IO and requires a
+    URI scheme. Local filesystem paths must be passed as file:// URIs.
+    """
+    if not path:
+        return path
+    if path.startswith("file://"):
+        return path
+    return "file://" + os.path.abspath(path)
+
+
+def _strip_file_uri(path: str) -> str:
+    if path and path.startswith("file://"):
+        return path[len("file://"):]
+    return path
+
 # Ray RLlib imports
 import ray
 from ray import tune
@@ -129,7 +148,8 @@ def eval_model(env_name, scenario_name, path2tar, rwf):
         else:
             model = DQN({ "env" : "MountainCar-v0", "evaluation_interval" : 9999999999, "evaluation_duration_unit" : "episodes",        "evaluation_duration" : 3, "explore" : False})
             
-        model.restore(path2tar)
+        # RLlib checkpoints may require file:// URIs (pyarrow).
+        model.restore(_to_file_uri(path2tar))
         
         print("Env observation space: {}".format(env.observation_space))
         print("Action space: {}".format(env.action_space))
@@ -201,7 +221,7 @@ def eval_model(env_name, scenario_name, path2tar, rwf):
             )
             model = config_eval.build_algo()
             
-        model.restore(path2tar)
+        model.restore(_to_file_uri(path2tar))
         #print("Print model")
         #print(model.get_config().model)
         #exit()
@@ -274,7 +294,8 @@ def train_model(iterations, stop_rw, env_name, scenario_name, path2tar, rwf):
         # Rename/move the checkpoint to the desired path
         if not os.path.exists(os.path.dirname(path2tar)):
             os.makedirs(os.path.dirname(path2tar), exist_ok=True)
-        model.save(path2tar)
+        # Ray>=2.5x expects file:// URIs for checkpoint directories.
+        model.save(_to_file_uri(path2tar))
 
     if env_name == "NewCerere":
         env = gymnasium.make('gym_examples/CERERE-v0', render_mode=None, rw_func=rwf, scenario=scenario_name)
@@ -411,7 +432,7 @@ def train_model(iterations, stop_rw, env_name, scenario_name, path2tar, rwf):
         # Rename/move the checkpoint to the desired path
         if not os.path.exists(os.path.dirname(path2tar)):
             os.makedirs(os.path.dirname(path2tar), exist_ok=True)
-        model.save(path2tar)
+        model.save(_to_file_uri(path2tar))
         env.close()
 ###### Train End
 
