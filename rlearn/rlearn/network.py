@@ -13,6 +13,16 @@ rw_steps = 0
 data_ex = 0
 
 
+# Keep stdout clean during large-scale RL training/evaluation runs.
+# Enable debug prints by setting: CERERE_VERBOSE=1
+_CERERE_VERBOSE = os.getenv("CERERE_VERBOSE", "0").lower() not in ("0", "false", "no", "")
+
+
+def _vprint(*args, **kwargs):
+    if _CERERE_VERBOSE:
+        print(*args, **kwargs)
+
+
 
 def getTopologyFromCsv(path):
     # Create Dictionary containing the Network Topology as adjacency list including the health of each node
@@ -270,7 +280,7 @@ def getReward2(critserver, optserver, topology, nwstate, pFlag, netgraph, in_act
     if reachable_infected_nodes == 0:
         reward = healthy_nodes_no_infected_subg / len(topology)
         terminate = 1
-        print("Terminate (no infected nodes in subgraph), Reward = %f" % reward)
+        _vprint("Terminate (no infected nodes in subgraph), Reward = %f" % reward)
         return reward, terminate, reachable_healthy_nodes, reachable_infected_nodes, data_ex
 
     if in_action < len(topology):
@@ -301,7 +311,7 @@ def getReward2(critserver, optserver, topology, nwstate, pFlag, netgraph, in_act
         # doNothing
         reward = 0
         if in_action >= len(in_actionSpace):
-            print("Exit, action outside action space")
+            _vprint("Exit, action outside action space")
             exit(1)
     
     #print("Rw steps %d, Reward = %f" % (rw_steps, reward))
@@ -323,7 +333,7 @@ def getReward3(critserver, optserver, topology, nwstate, pFlag, netgraph, in_act
     if [1, critserver] in nwstate:
         reward = -1
         terminate = 1
-        print("Terminate (infected critical server), Reward = %f" % reward)
+        _vprint("Terminate (infected critical server), Reward = %f" % reward)
         return reward, terminate, reachable_healthy_nodes, reachable_infected_nodes, data_ex
 
 
@@ -343,7 +353,7 @@ def getReward3(critserver, optserver, topology, nwstate, pFlag, netgraph, in_act
     if len(reachable[0]) - reachable_infected_nodes < 0.25 * len(topology):
         reward = -1
         terminate = 1
-        print("Terminate (small leftover topology), Reward = %f" % reward)
+        _vprint("Terminate (small leftover topology), Reward = %f" % reward)
         return reward, terminate, reachable_healthy_nodes, reachable_infected_nodes, data_ex
 
 
@@ -351,7 +361,7 @@ def getReward3(critserver, optserver, topology, nwstate, pFlag, netgraph, in_act
     if reachable_infected_nodes == 0:
         reward = healthy_nodes_no_infected_subg / len(topology)
         terminate = 1
-        print("Terminate (no infected nodes in subgraph), Reward = %f" % reward)
+        _vprint("Terminate (no infected nodes in subgraph), Reward = %f" % reward)
         return reward, terminate, reachable_healthy_nodes, reachable_infected_nodes, data_ex
 
 
@@ -362,7 +372,7 @@ def getReward3(critserver, optserver, topology, nwstate, pFlag, netgraph, in_act
         if node_to_patch == critserver or node_to_patch in optserver:
             reward = -1
             terminate = 1
-            print("Terminate (crit/opt server patched), Reward = %f" % reward)
+            _vprint("Terminate (crit/opt server patched), Reward = %f" % reward)
             return reward, terminate, reachable_healthy_nodes, reachable_infected_nodes, data_ex
         else: 
             reward = ( (healthy_nodes_no_infected_subg / len(topology)) - (reachable_infected_nodes / len(topology)) )/5
@@ -377,16 +387,16 @@ def getReward3(critserver, optserver, topology, nwstate, pFlag, netgraph, in_act
         #reward = 0
         reward = 1
         terminate = 1
-        print("Terminate (block traffic), Reward = %f" % reward)
+        _vprint("Terminate (block traffic), Reward = %f" % reward)
         return reward, terminate, reachable_healthy_nodes, reachable_infected_nodes, data_ex
     else:
         # doNothing
         reward = 0
         if in_action >= len(in_actionSpace):
-            print("Exit, action outside action space")
+            _vprint("Exit, action outside action space")
             exit(1)
     
-    print("Rw steps %d, Reward = %f" % (rw_steps, reward))
+    _vprint("Rw steps %d, Reward = %f" % (rw_steps, reward))
     return reward, terminate, reachable_healthy_nodes, reachable_infected_nodes, data_ex
 
 
