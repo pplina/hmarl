@@ -114,7 +114,7 @@ class CerereNet(gym.Env):
 
     def _init(self):
         # Attack once in Order to achieve Initial Configuration of the Paper used
-        self.nwstate = attacker.attack(self.net, self.netgraph, self.nwstate, self.critserver, self.mode, self.attackmode)
+        self.nwstate = attacker.attack(self.net, self.netgraph, self.nwstate, self.critserver, 1, self.mode, self.attackmode)
         self.flatState = network.getVectorFromState2(self.nwstate, self.critserver, self.netgraph)
         all_reachable_nodes, reachable_healthy_nodes, reachable_infected_nodes, healthy_nodes_no_infected_subg, self.data_ex = network.getNodeStatistic(self.critserver, self.optserver, self.topology, self.nwstate, self.netgraph, self.block_traffic)
         # print(self.state)
@@ -154,7 +154,7 @@ class CerereNet(gym.Env):
              #self._render_frame()
              self.render()
         
-        self.nwstate = attacker.attack(self.net, self.netgraph, self.nwstate, self.critserver, self.mode, self.attackmode)
+        self.nwstate = attacker.attack(self.net, self.netgraph, self.nwstate, self.critserver, 1, self.mode, self.attackmode)
         # reward function
         #reward, terminated2, reachable_healthy_nodes, reachable_infected_nodes = network.getReward(self.critserver, self.optserver, self.topology, self.nwstate, pFlag, self.netgraph)
         if self.rw_function == 2:

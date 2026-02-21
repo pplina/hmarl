@@ -3,7 +3,6 @@ from gymnasium.spaces import Discrete, Box
 import argparse
 import numpy as np
 import torch
-import os
 import random
 import datetime
 import sys
@@ -12,6 +11,7 @@ import json
 from pathlib import Path
 import re
 import os
+import tree  # pip install dm_tree
 
 # Ray RLlib imports
 import ray
@@ -25,11 +25,11 @@ from ray.tune.logger import UnifiedLogger
 from ray.rllib.core.rl_module.rl_module import RLModuleSpec
 from ray.rllib.core.rl_module.default_model_config import DefaultModelConfig
 from ray.rllib.core.rl_module.multi_rl_module import MultiRLModuleSpec
-from ray.rllib.examples.rl_modules.classes.random_rlm import RandomRLModule
-from ray.rllib.examples.rl_modules.classes import (
-    AlwaysSameHeuristicRLM,
-    BeatLastHeuristicRLM,
-)
+#from ray.rllib.examples.rl_modules.classes.random_rlm import RandomRLModule
+#from ray.rllib.examples.rl_modules.classes import (
+#    AlwaysSameHeuristicRLM,
+#    BeatLastHeuristicRLM,
+#)
 from ray.rllib.utils.metrics import (
     ENV_RUNNER_RESULTS,
     EPISODE_RETURN_MEAN,
@@ -49,10 +49,42 @@ from ray.rllib.core.columns import Columns
 from ray.rllib.core.rl_module.rl_module import RLModule
 from ray.rllib.utils.numpy import convert_to_numpy, softmax
 from ray.rllib.utils.framework import try_import_torch
+from ray.rllib.policy.sample_batch import SampleBatch
+from ray.rllib.utils.annotations import override
+from ray.rllib.utils.spaces.space_utils import batch as batch_func
 
 torch, _ = try_import_torch()
 
 import cerere_net_v2
+
+
+
+class HeuristicAttackModule(RLModule):
+    @override(RLModule)
+    def _forward(self, batch, **kwargs):
+        obs_batch_size = len(tree.flatten(batch[SampleBatch.OBS])[0])
+#        print(f"Obs Batch size {obs_batch_size}")
+#        actions = batch_func(
+#            [self.action_space.sample() for _ in range(obs_batch_size)]
+#        )
+        actions = batch_func(
+            [1 for _ in range(obs_batch_size)]
+        )
+        return {SampleBatch.ACTIONS: actions}
+
+    @override(RLModule)
+    def _forward_train(self, *args, **kwargs):
+        # HeuristicAttackModule should always be configured as non-trainable.
+        # To do so, set in your config:
+        # `config.multi_agent(policies_to_train=[list of ModuleIDs to be trained,
+        # NOT including the ModuleID of this RLModule])`
+        raise NotImplementedError("HeuristicAttackModule: Should not be trained!")
+
+    def compile(self, *args, **kwargs):
+        """Dummy method for compatibility with TorchRLModule.
+
+        This is hit when RolloutWorker tries to compile TorchRLModule."""
+ 
 
 
 # Custom logger function 
@@ -132,12 +164,12 @@ def train_model(iterations, stop_rw, env_name, scenario_name, path2tar, rwf):
         .rl_module(
             rl_module_spec=MultiRLModuleSpec(
                 rl_module_specs={
-                    "p0": RLModuleSpec(module_class=RandomRLModule),
+                    "p0": RLModuleSpec(module_class=HeuristicAttackModule),
                     "p1": RLModuleSpec(),
                 }
             ),
         )
-        .debugging(log_level="DEBUG", logger_creator=custom_logger_creator(tmp_path, "ppo_cerere"))
+        .debugging(log_level="ERROR", logger_creator=custom_logger_creator(tmp_path, "ppo_cerere"))
         .framework(framework="torch")
     )
     #  Make PPO
@@ -198,11 +230,11 @@ def train_model_with_tune(iterations, stop_rw, env_name, scenario_name, path2tar
             entropy_coeff = 0.02,     
             vf_loss_coeff=0.25,
             kl_coeff = 0.005,  
-#               model={
-#                   "fcnet_hiddens": [256,256],
-#                   "fcnet_activation": "relu",
-#                   "vf_share_layers": True,
-#               },
+            model={
+                   "fcnet_hiddens": [256,256],
+                   "fcnet_activation": "relu",
+                   "vf_share_layers": True,
+               },
         )
 #           .env_runners(
 #           env_to_module_connector=lambda env: (
@@ -220,8 +252,8 @@ def train_model_with_tune(iterations, stop_rw, env_name, scenario_name, path2tar
         .rl_module(
             rl_module_spec=MultiRLModuleSpec(
                 rl_module_specs={
-                    "p0": RLModuleSpec(module_class=RandomRLModule),
-                    "p1": RLModuleSpec(),
+                    "p0": RLModuleSpec(module_class=HeuristicAttackModule),
+                    "p1": RLModuleSpec(	),
                 }
             ),
         )
@@ -395,7 +427,8 @@ def eval_model2(in_render_mode, in_scenario, path2tar, in_rwf):
             else:
                 #action = env.action_space(agent).sample()
                 if agent == env.possible_agents[0]:
-                    action = env.action_space(agent).sample()
+                    #action = env.action_space(agent).sample()
+                    action = 1
                     print("AGENT %s attempted to do %d" % (str(agent), action))
                 else: 
                     #action = env.action_space(agent).sample()
@@ -403,7 +436,9 @@ def eval_model2(in_render_mode, in_scenario, path2tar, in_rwf):
                     rl_module_out = rl_module.forward_inference(input_dict)
                     logits = convert_to_numpy(rl_module_out[Columns.ACTION_DIST_INPUTS])
                     # Perform the sampling step in numpy for simplicity.
-                    action = np.random.choice(env.action_space(agent).n, p=softmax(logits[0]))
+                    # action = np.random.choice(env.action_space(agent).n, p=softmax(logits[0]))
+                    # Select action without exploration
+                    action = np.argmax(softmax(logits[0]))
                     print("AGENT %s attempted do %d" % (str(agent), action))         
             env.step(action)          
 
@@ -428,12 +463,12 @@ def test(in_render_mode, in_scenario):
     env = cerere_net_v2.env(**env_kwargs)
 
     myrewards = {agent: 0 for agent in env.possible_agents}
-    num_games = 1
+    num_tests = 1
     i = 0
 
-    for i in range(num_games):
+    for i in range(num_tests):
         i += 1
-        print("######################### Test Round %d ########################" % i)
+        print("######################### Test No %d ########################" % i)
         env.reset(seed=42)
 
         for agent in env.agent_iter():
@@ -443,12 +478,12 @@ def test(in_render_mode, in_scenario):
                 action = None
                 print("Agent %s do None" % (str(agent)))
             else:
-                action = env.action_space(agent).sample()
                 if agent == env.possible_agents[0]:
                     #action = env.action_space(agent).sample()
+                    action = 1
                     print("AGENT %s attempted to do %d" % (str(agent), action))
                 else: 
-                    #action = env.action_space(agent).sample()
+                    action = env.action_space(agent).sample()
                     print("AGENT %s attempted do %d" % (str(agent), action))         
             env.step(action)          
 
@@ -457,7 +492,7 @@ def test(in_render_mode, in_scenario):
                     myrewards[a] += env.rewards[a]
                     print("Agent %s, Reward %f" % (str(a), env.rewards[a]))
                 print("+++++++++++ Both agents have played +++++++++++")  
-
+                
     myavg_reward = sum(myrewards.values()) / len(myrewards.values())
     print("Rewards: ", myrewards)
     print(f"Avg reward: {myavg_reward}")

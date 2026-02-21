@@ -23,28 +23,9 @@ import attacker as attacker
 import defender as defender
 import network as network
 
-"""
-ROCK = 0 #Stein
-PAPER = 1 #Papier
-SCISSORS = 2 #Schere
-NONE = 3
-MOVES = ["ROCK", "PAPER", "SCISSORS", "None"]
-
-#Papier schlägt Stein
-#Stein schlägt Schere
-#Schere schlägt Papier
-REWARD_MAP = {
-    (ROCK, ROCK): (0, 0),
-    (ROCK, PAPER): (-1, 1),
-    (ROCK, SCISSORS): (1, -1),
-    (PAPER, ROCK): (1, -1),
-    (PAPER, PAPER): (0, 0),
-    (PAPER, SCISSORS): (-1, 1),
-    (SCISSORS, ROCK): (-1, 1),
-    (SCISSORS, PAPER): (1, -1),
-    (SCISSORS, SCISSORS): (0, 0),
-}
-"""
+NOTYPE_ACTION = 0
+ATTACK_ACTION = 1
+DEFENSE_ACTION = 2
 
 __all__ = ["env", "parallel_env", "cerere_net_v2_env"]
 
@@ -83,7 +64,6 @@ class cerere_net_v2_env(AECEnv):
         - render_mode
         """
         super().__init__()
-        #AECEnv.__init__(self)
         #print("#### Beginn INIT new topology ###")
         if scenario == 'enterprise':
             infected_nodes = ["s3_10", "s1_7", "s2_9"]
@@ -132,6 +112,7 @@ class cerere_net_v2_env(AECEnv):
         np.set_printoptions(threshold=sys.maxsize)
         ##### replace # self.observation_state = np.array(self.flatState, dtype=np.float32)
         ##### replace # self.action_space = spaces.Discrete(len(self.actionSpace))
+        self.actualActionType = NOTYPE_ACTION
         self.actualAction = -1
         self.data_ex = 0
         self.mystep = 0
@@ -146,8 +127,8 @@ class cerere_net_v2_env(AECEnv):
         )
 
         # optional: we can define the observation and action spaces here as attributes to be used in their corresponding methods
-        self._action_spaces = {agent: spaces.Discrete(len(self.actionSpace)) for agent in self.possible_agents}
-        #self._action_spaces = {self.possible_agents[0]:spaces.Discrete(10), self.possible_agents[1]:spaces.Discrete(19)}
+        #self._action_spaces = {agent: spaces.Discrete(len(self.actionSpace)) for agent in self.possible_agents}
+        self._action_spaces = {self.possible_agents[0]:spaces.Discrete(2), self.possible_agents[1]:spaces.Discrete(len(self.actionSpace))}
         
         #self._observation_spaces = {
         #    agent: spaces.Box(0, 1, shape=(len(self.flatState),), dtype=np.float32) for agent in self.possible_agents
@@ -191,19 +172,28 @@ class cerere_net_v2_env(AECEnv):
             gymnasium.logger.warn( "You are calling render method without specifying any render mode.")
             return
 
-        if self.actualAction < len(self.topology) and self.actualAction >= 0:
-            title = "Step " + str(self.mystep) + ": Isolate and patch node " + self.actionSpace[self.actualAction]
-            #title = "Isolate node " + self.actionSpace[self.actualAction]
-        elif self.actualAction >= len(self.topology) and self.actualAction < len(self.topology) + 3 and self.actualAction > 0:
-            title = "Step " + str(self.mystep) + ": Migrate crtitical server to node " + self.actionSpace[self.actualAction]
-        elif self.actualAction >= len(self.topology) + 3 and self.actualAction < len(self.topology) + 4 and self.actualAction > 0:
-            title = "Step " + str(self.mystep) + ": Block traffic"
-        elif self.actualAction == -1:
+        title = ""
+        
+        if self.actualActionType == NOTYPE_ACTION or self.actualAction == -1:
             title = "Step " + str(self.mystep) + ": Initial state"
-        elif self.actualAction == -2:
+        if self.actualActionType == ATTACK_ACTION:
             title = "Step " + str(self.mystep) + ": Attack"
-        else:
-            title = "Step " + str(self.mystep) + ": Do nothing"
+        
+        if self.actualActionType == DEFENSE_ACTION:
+            if self.actualAction < len(self.topology) and self.actualAction >= 0:
+                title = "Step " + str(self.mystep) + ": Isolate and patch node " + self.actionSpace[self.actualAction]
+                #title = "Isolate node " + self.actionSpace[self.actualAction]
+            elif self.actualAction >= len(self.topology) and self.actualAction < len(self.topology) + 3 and self.actualAction > 0:
+                title = "Step " + str(self.mystep) + ": Migrate crtitical server to node " + self.actionSpace[self.actualAction]
+            elif self.actualAction >= len(self.topology) + 3 and self.actualAction < len(self.topology) + 4 and self.actualAction > 0:
+                title = "Step " + str(self.mystep) + ": Block traffic"
+#            elif self.actualAction == -1:
+#               title = "Step " + str(self.mystep) + ": Initial state"
+#            elif self.actualAction == -2:
+#               title = "Step " + str(self.mystep) + ": Attack"
+            else:
+                title = "Step " + str(self.mystep) + ": Do nothing"
+
         print(title)
         plt.title(title)
         box_textstr = 'Data Ex = ' + str (self.data_ex)
@@ -254,13 +244,14 @@ class cerere_net_v2_env(AECEnv):
 
     def _init(self):
         # Attack once in Order to achieve Initial Configuration of the Paper used
-        self.nwstate = attacker.attack(self.net, self.netgraph, self.nwstate, self.critserver, self.mode, self.attackmode)
+        ####-----self.nwstate = attacker.attack(self.net, self.netgraph, self.nwstate, self.critserver, self.mode, self.attackmode)
         self.flatState = network.getVectorFromState2(self.nwstate, self.critserver, self.netgraph)
         all_reachable_nodes, reachable_healthy_nodes, reachable_infected_nodes, healthy_nodes_no_infected_subg, self.data_ex = network.getNodeStatistic(self.critserver, self.optserver, self.topology, self.nwstate, self.netgraph, self.block_traffic)
         # print(self.state)
         ##### replace # self.observation_state = np.array(self.flatState, dtype=np.float32)
         
         # print(self.observation_state)
+        self.actualActionType = NOTYPE_ACTION
         self.actualAction = -1
 
 
@@ -308,10 +299,7 @@ class cerere_net_v2_env(AECEnv):
 
     def step(self, action):
         
-        #my_truncated = False
-        #my_terminated = False
         reward = 0
-
         #print("#### Begin STEP in pettingzoo ###")
         #print(self.nwstate)
 
@@ -323,24 +311,37 @@ class cerere_net_v2_env(AECEnv):
         self._cumulative_rewards[self.agent_selection] = 0
         #print("AGENT %s TRY do %d" % (str(self.agent_selection), action))
 
+        if self._agent_selector.is_first():
+            print("AGENT %s do %d" % (str(self.agent_selection), action))
+            self.actualAction = action
+            self.actualAction = -2
+            self.actualActionType = ATTACK_ACTION
+            self.nwstate = attacker.attack(self.net, self.netgraph, self.nwstate, self.critserver, action, self.mode, self.attackmode)
+            self.flatState = network.getVectorFromState2(self.nwstate, self.critserver, self.netgraph)
+            if self.render_mode == "human":
+                self.render()
+            for i in self.agents:
+                self.observations[i] =np.array(self.flatState, dtype=np.float32)
+
         if self._agent_selector.is_last():
-            #print("AGENT %s do %d" % (str(self.agent_selection), action))
+            print("AGENT %s do %d" % (str(self.agent_selection), action))
             #print(self.nwstate)
             self.mystep = self.mystep + 1
             self.actualAction = action
+            self.actualActionType = DEFENSE_ACTION
             self.nwstate, self.netgraph, pFlag, self.critserver, self.optserver, self.block_traffic = defender.getAction(self.net, self.netgraph,self.critserver, self.optserver, action, self.actionSpace, self.topology, self.nwstate, self.block_traffic)
         
-            if self.render_mode == "human":
-                self.render()
+            ####---if self.render_mode == "human":
+            ####---    self.render()
         
-            self.nwstate = attacker.attack(self.net, self.netgraph, self.nwstate, self.critserver, self.mode, self.attackmode)
+            ####---self.nwstate = attacker.attack(self.net, self.netgraph, self.nwstate, self.critserver, self.mode, self.attackmode)
             # reward function
             #reward, terminated2, reachable_healthy_nodes, reachable_infected_nodes = network.getReward(self.critserver, self.optserver, self.topology, self.nwstate, pFlag, self.netgraph)
             if self.rw_function == 2:
                 reward, terminated2, reachable_healthy_nodes, reachable_infected_nodes, self.data_ex = network.getReward3(self.critserver, self.optserver, self.topology, self.nwstate, pFlag, self.netgraph, action, self.actionSpace, self.block_traffic)
             else:
                 reward, terminated2, reachable_healthy_nodes, reachable_infected_nodes, self.data_ex = network.getReward2(self.critserver, self.optserver, self.topology, self.nwstate, pFlag, self.netgraph, action, self.actionSpace, self.block_traffic)
-            self.actualAction = -2
+            ####--self.actualAction = -2
             #print(self.nwstate)
             self.flatState = network.getVectorFromState2(self.nwstate, self.critserver, self.netgraph)
             ##### replace # self.observation_state = np.array(self.flatState, dtype=np.float32)
@@ -368,65 +369,6 @@ class cerere_net_v2_env(AECEnv):
         #print("#### End STEP in pettingzoo ###")
         #print(self.nwstate)
         #print("Rewards = {} Accumulate_rewards = {}".format(self.rewards, self._cumulative_rewards))
-
-        """
-        #old
-        if ( self.terminations[self.agent_selection] or self.truncations[self.agent_selection] ):
-            self._was_dead_step(action)
-            return
-
-        agent = self.agent_selection
-
-        self.state[self.agent_selection] = action
-
-        # collect reward if it is the last agent to act
-        if self._agent_selector.is_last():
-            # same action => 0 reward each agent
-            if self.state[self.agents[0]] == self.state[self.agents[1]]:
-                rewards = (0, 0)
-            else:
-                # same action parity => lower action number wins
-                if (self.state[self.agents[0]] + self.state[self.agents[1]]) % 2 == 0:
-                    if self.state[self.agents[0]] > self.state[self.agents[1]]:
-                        rewards = (-1, 1)
-                    else:
-                        rewards = (1, -1)
-                # different action parity => higher action number wins
-                else:
-                    if self.state[self.agents[0]] > self.state[self.agents[1]]:
-                        rewards = (1, -1)
-                    else:
-                        rewards = (-1, 1)
-            self.rewards[self.agents[0]], self.rewards[self.agents[1]] = rewards
-
-            self.num_moves += 1
-
-            self.truncations = {
-                agent: self.num_moves >= self.max_cycles for agent in self.agents
-            }
-            for i in self.agents:
-                self.observations[i] = self.state[ self.agents[1 - self.agent_name_mapping[i]] ]
-
-            if self.render_mode == "human":
-                self.render()
-
-            # record history by pushing back
-            #self.history[2:] = self.history[:-2]
-            #self.history[0] = self.state[self.agents[0]]
-            #self.history[1] = self.state[self.agents[1]]
-
-        else:
-            self.state[self.agents[1 - self.agent_name_mapping[agent]]] = NONE
-
-            self._clear_rewards()
-
-            if self.render_mode == "human":
-                self.render()
-
-        self._cumulative_rewards[self.agent_selection] = 0
-        self.agent_selection = self._agent_selector.next()
-        self._accumulate_rewards()
-        """
 
 
 

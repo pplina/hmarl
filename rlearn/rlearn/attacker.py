@@ -6,7 +6,12 @@ import networkx as nx
 import random
 
 
-def attack(net, netgraph, nwstate, critserver, mode, attmode):
+def attack(net, netgraph, nwstate, critserver, action, mode, attmode):
+		
+    if (action != 1):
+        print("Unknown action")
+        return nwstate
+
     # Collect all infected Nodes
     attnodes = [node[1] for node in nwstate if [1, node[1]] in nwstate and len(node) == 2]
     # All infected nodes can only infect 1 node in neighbourhood
