@@ -132,6 +132,33 @@ def _to_file_uri(path: str) -> str:
         return path
     return "file://" + os.path.abspath(path)
 
+class HeuristicAttackModule(RLModule):
+    @override(RLModule)
+    def _forward(self, batch, **kwargs):
+        obs_batch_size = len(tree.flatten(batch[SampleBatch.OBS])[0])
+#        print(f"Obs Batch size {obs_batch_size}")
+#        actions = batch_func(
+#            [self.action_space.sample() for _ in range(obs_batch_size)]
+#        )
+        actions = batch_func(
+            [1 for _ in range(obs_batch_size)]
+        )
+        return {SampleBatch.ACTIONS: actions}
+
+    @override(RLModule)
+    def _forward_train(self, *args, **kwargs):
+        # HeuristicAttackModule should always be configured as non-trainable.
+        # To do so, set in your config:
+        # `config.multi_agent(policies_to_train=[list of ModuleIDs to be trained,
+        # NOT including the ModuleID of this RLModule])`
+        raise NotImplementedError("HeuristicAttackModule: Should not be trained!")
+
+    def compile(self, *args, **kwargs):
+        """Dummy method for compatibility with TorchRLModule.
+
+        This is hit when RolloutWorker tries to compile TorchRLModule."""
+ 
+
 
 # Custom logger function 
 def custom_logger_creator(custom_path, custom_str=""):
@@ -658,17 +685,21 @@ def eval_model2(
                 action = None
             else:
                 if agent == env.possible_agents[0]:
-                    # Attacker/other player is random (baseline)
-                    action = env.action_space(agent).sample()
-                else:
+                    #action = env.action_space(agent).sample()
+                    action = 1
+                    print("AGENT %s attempted to do %d" % (str(agent), action))
+                else: 
+                    #action = env.action_space(agent).sample()
                     input_dict = {Columns.OBS: torch.from_numpy(observation).unsqueeze(0)}
                     rl_module_out = rl_module.forward_inference(input_dict)
                     logits = convert_to_numpy(rl_module_out[Columns.ACTION_DIST_INPUTS])
-                    action = int(
-                        np.random.choice(env.action_space(agent).n, p=softmax(logits[0]))
-                    )
+                    # Perform the sampling step in numpy for simplicity.
+                    # action = np.random.choice(env.action_space(agent).n, p=softmax(logits[0]))
+                    # Select action without exploration
+                    action = np.argmax(softmax(logits[0]))
+                    print("AGENT %s attempted do %d" % (str(agent), action))         
+            env.step(action)          
 
-            env.step(action)
 
         # Success criterion: critical server not infected at episode end
         crit = getattr(env.unwrapped, "critserver", None)
