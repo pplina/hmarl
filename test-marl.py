@@ -26,6 +26,9 @@ from ray.rllib.core.rl_module.rl_module import RLModuleSpec
 from ray.rllib.core.rl_module.default_model_config import DefaultModelConfig
 from ray.rllib.core.rl_module.multi_rl_module import MultiRLModuleSpec
 from ray.rllib.examples.rl_modules.classes.random_rlm import RandomRLModule
+from ray.rllib.examples.rl_modules.classes.action_masking_rlm import (
+    ActionMaskingTorchRLModule,
+)
 from ray.rllib.examples.rl_modules.classes import (
     AlwaysSameHeuristicRLM,
     BeatLastHeuristicRLM,
@@ -231,6 +234,160 @@ def train_model(iterations, stop_rw, env_name, scenario_name, path2tar, rwf):
     # Note: We register an env creator that constructs env instances inside RLlib.
     # Do not attempt to close a local `env` object here.
 ###### Train Ende 
+
+
+###### Train HMARL Begin
+def train_hmarl(iterations, stop_rw, scenario_name, path2tar, rwf):
+    """Train PPO on the HMARL env (manager + 5 workers)."""
+
+    env_kwargs = dict(render_mode=None, rw_func=rwf, scenario=scenario_name)
+    register_env(
+        "pettingzoo_cerere_hmarl",
+        lambda env_config: PettingZooEnv(cerere_net_v2.hmarl_env(**env_kwargs)),
+    )
+
+    if not ray.is_initialized():
+        ray.init(ignore_reinit_error=True)
+
+    tmp_path = "./tb_log/"
+    os.makedirs(tmp_path, exist_ok=True)
+
+    # Policy IDs (6 policies as requested).
+    policies = {
+        "pi_manager",
+        "pi_worker_0",
+        "pi_worker_1",
+        "pi_worker_2",
+        "pi_worker_3",
+        "pi_worker_mig",
+    }
+
+    def policy_mapping_fn(agent_id, episode, **kwargs):
+        if agent_id == "manager":
+            return "pi_manager"
+        if agent_id.startswith("worker_"):
+            # worker_0..worker_3
+            return f"pi_{agent_id}"
+        if agent_id == "worker_mig":
+            return "pi_worker_mig"
+        raise ValueError(f"Unknown HMARL agent_id: {agent_id}")
+
+    config = (
+        PPOConfig()
+        .environment("pettingzoo_cerere_hmarl")
+        .training(
+            train_batch_size=1000,
+            lr=0.0003,
+            gamma=0.99,
+            clip_param=0.2,
+            entropy_coeff=0.02,
+            vf_loss_coeff=0.25,
+            kl_coeff=0.005,
+        )
+        .env_runners(num_env_runners=0)
+        .multi_agent(
+            policies=policies,
+            policy_mapping_fn=policy_mapping_fn,
+            policies_to_train=list(policies),
+        )
+        .rl_module(
+            rl_module_spec=MultiRLModuleSpec(
+                rl_module_specs={
+                    # Default PPO Torch RLModule for each policy.
+                    "pi_manager": RLModuleSpec(),
+                    "pi_worker_0": RLModuleSpec(),
+                    "pi_worker_1": RLModuleSpec(),
+                    "pi_worker_2": RLModuleSpec(),
+                    "pi_worker_3": RLModuleSpec(),
+                    "pi_worker_mig": RLModuleSpec(),
+                }
+            )
+        )
+        .debugging(log_level="ERROR", logger_creator=custom_logger_creator(tmp_path, "ppo_cerere_hmarl"))
+        .framework(framework="torch")
+    )
+
+    algo = config.build_algo()
+    print(f"Starting HMARL training for {iterations} iterations ...")
+    last_mean = None
+    for i in range(iterations):
+        result = algo.train()
+        last_mean = result[ENV_RUNNER_RESULTS][EPISODE_RETURN_MEAN]
+        print(f"Iter: {i}, Reward mean: {last_mean}")
+        if last_mean >= stop_rw:
+            print(f"Reached episode return of {stop_rw} -> stopping")
+            break
+
+    checkpoint_path = algo.save(_to_file_uri(path2tar))
+    print(f"HMARL model saved at {checkpoint_path}")
+
+
+###### Eval HMARL Begin
+def eval_hmarl(in_scenario, path2tar, in_rwf, n_episodes: int = 10, base_seed: int = 42):
+    """Evaluate a HMARL checkpoint by running RLlib's evaluate() API."""
+    env_kwargs = dict(render_mode=None, rw_func=in_rwf, scenario=in_scenario)
+    register_env(
+        "pettingzoo_cerere_hmarl",
+        lambda env_config: PettingZooEnv(cerere_net_v2.hmarl_env(**env_kwargs)),
+    )
+
+    if not ray.is_initialized():
+        ray.init(ignore_reinit_error=True)
+
+    tmp_path = "./tb_log/"
+    os.makedirs(tmp_path, exist_ok=True)
+
+    policies = {
+        "pi_manager",
+        "pi_worker_0",
+        "pi_worker_1",
+        "pi_worker_2",
+        "pi_worker_3",
+        "pi_worker_mig",
+    }
+
+    def policy_mapping_fn(agent_id, episode, **kwargs):
+        if agent_id == "manager":
+            return "pi_manager"
+        if agent_id.startswith("worker_"):
+            return f"pi_{agent_id}"
+        if agent_id == "worker_mig":
+            return "pi_worker_mig"
+        raise ValueError(f"Unknown HMARL agent_id: {agent_id}")
+
+    eval_config = (
+        PPOConfig()
+        .environment("pettingzoo_cerere_hmarl")
+        .env_runners(num_env_runners=0)
+        .multi_agent(
+            policies=policies,
+            policy_mapping_fn=policy_mapping_fn,
+            policies_to_train=list(policies),
+        )
+        .rl_module(
+            rl_module_spec=MultiRLModuleSpec(
+                rl_module_specs={pid: RLModuleSpec() for pid in policies}
+            )
+        )
+        .debugging(log_level="ERROR", logger_creator=custom_logger_creator(tmp_path, "ppo_cerere_hmarl"))
+        .framework(framework="torch")
+        .evaluation(
+            evaluation_num_env_runners=0,
+            evaluation_interval=9999999999,
+            evaluation_duration_unit="episodes",
+            evaluation_duration=n_episodes,
+            evaluation_config={"explore": False, "seed": base_seed},
+        )
+    )
+
+    algo = eval_config.build_algo()
+    ckpt = _resolve_checkpoint_path(path2tar)
+    print(f"Restoring HMARL algo from checkpoint: {ckpt}")
+    algo.restore_from_path(_to_file_uri(ckpt))
+    results = algo.evaluate()
+    mean_ret = results.get("env_runners", {}).get("episode_return_mean")
+    print(f"HMARL eval: episode_return_mean={mean_ret}")
+    return results
 
 
 ###### Train with Tune Begin
@@ -644,6 +801,8 @@ if __name__ == "__main__":
     parser.add_argument('--train', help="Train model in the specified env", action="store_true")
     parser.add_argument('--trainWithTune', help="Train with ray tune model in the specified env", action="store_true")
     parser.add_argument('--test_hmarl', help="Smoke-test HMARL env (no RLlib)", action="store_true")
+    parser.add_argument('--train_hmarl', help="Train PPO on HMARL env", action="store_true")
+    parser.add_argument('--eval_hmarl', help="Eval PPO checkpoint on HMARL env", action="store_true")
     parser.add_argument('--iter', type=int, default=50000,
                         help='Number of trainings iterations (ent=100000/mil=100000) , default = 50000')
     parser.add_argument('--stop_rw', type=float, default=0.1,
@@ -700,16 +859,34 @@ if __name__ == "__main__":
         end = datetime.datetime.now().replace(microsecond=0)
         elapsed = end - start
         print("Stop train model with Tune in env %s after %s" % (ENVIRONMENT, elapsed))
-    else:
-        print("Do not know what to do in env %s" % ENVIRONMENT)
-
-    if args.test_hmarl:
+    elif args.test_hmarl:
         print("HMARL smoke test in scenario %s" % SCENARIO)
         start = datetime.datetime.now().replace(microsecond=0)
         test_hmarl(SCENARIO, args.rwf)
         end = datetime.datetime.now().replace(microsecond=0)
         elapsed = end - start
         print("HMARL smoke test done after %s" % elapsed)
+
+    elif args.train_hmarl:
+        print("Train HMARL PPO in scenario %s" % SCENARIO)
+        start = datetime.datetime.now().replace(microsecond=0)
+        train_hmarl(args.iter, args.stop_rw, SCENARIO, args.path2tar, args.rwf)
+        end = datetime.datetime.now().replace(microsecond=0)
+        elapsed = end - start
+        print("Stop train HMARL PPO after %s" % elapsed)
+
+    elif args.eval_hmarl:
+        print("Eval HMARL PPO in scenario %s" % SCENARIO)
+        start = datetime.datetime.now().replace(microsecond=0)
+        eval_hmarl(SCENARIO, args.path2tar, args.rwf, n_episodes=args.eval_episodes, base_seed=args.eval_seed)
+        end = datetime.datetime.now().replace(microsecond=0)
+        elapsed = end - start
+        print("Stop eval HMARL PPO after %s" % elapsed)
+
+    else:
+        print("Do not know what to do in env %s" % ENVIRONMENT)
+
+
 
 
 
