@@ -382,9 +382,11 @@ class cerere_hmarl_env(AECEnv):
                 # Pull results from baseline env.
                 defender_reward = float(self.base_env.rewards.get("player_1", 0.0))
 
-                # Broadcast same reward to all HMARL agents (cooperative).
-                for aid in self.agents:
-                    self.rewards[aid] = defender_reward
+                # Path B credit assignment:
+                # Only manager + selected worker receive the (team) reward.
+                # Non-selected workers get 0.0 to avoid training on unrelated signal.
+                self.rewards[self.manager_id] = defender_reward
+                self.rewards[agent] = defender_reward
 
                 # Sync observation and done flags.
                 self._sync_obs_from_base()
@@ -821,6 +823,7 @@ class cerere_net_v2_env(AECEnv):
         self.agent_selection = self._agent_selector.next()
         self._accumulate_rewards()
         """
+
 
 
 
