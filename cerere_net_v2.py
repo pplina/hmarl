@@ -648,10 +648,21 @@ class cerere_net_v2_env(AECEnv):
         self.block_traffic = 0
 
         # Sample one of the fixed initial compromise patterns on reset (enterprise only).
+        # Allow forcing a specific config via `reset(options={"config_key": "C1"})`.
         if hasattr(self, "topologies_by_config"):
-            if seed is not None:
-                random.seed(seed)
-            self.selected_config_key = random.choice(self.config_keys)
+            forced = None
+            if isinstance(options, dict):
+                forced = options.get("config_key") or options.get("config")
+            if forced is not None:
+                if forced not in self.topologies_by_config:
+                    raise ValueError(
+                        f"Unknown enterprise config_key={forced}. Allowed: {list(self.topologies_by_config.keys())}"
+                    )
+                self.selected_config_key = forced
+            else:
+                if seed is not None:
+                    random.seed(seed)
+                self.selected_config_key = random.choice(self.config_keys)
             self.topology = self.topologies_by_config[self.selected_config_key]
 
         # Important: resetNetwork mutates the provided netgraph by adding edges.
@@ -810,6 +821,7 @@ class cerere_net_v2_env(AECEnv):
         self.agent_selection = self._agent_selector.next()
         self._accumulate_rewards()
         """
+
 
 
 
