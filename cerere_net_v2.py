@@ -129,9 +129,24 @@ class cerere_hmarl_env(AECEnv):
         self.possible_agents = [self.manager_id] + self.worker_ids + [self.worker_mig_id]
         self.agents = []
 
-        # Manager selects (skill, worker_idx). worker_idx in [0..4] (4=sub-mig).
+        # Manager selects from a *valid* set of (skill, worker) combinations.
+        # This avoids wasting exploration probability mass on impossible pairings
+        # such as (skill=migrate, worker=worker_0).
+        #
+        # Valid combinations in this project:
+        # - Skill 0 (Patch): worker_0..worker_3
+        # - Skill 1 (Migrate): worker_mig
+        # - Skill 2 (Block traffic): worker_mig
+        # - Skill 3 (No-op): worker_mig
         self.num_skills = int(num_skills)
-        self._manager_action_space = spaces.MultiDiscrete([self.num_skills, 5])
+        self._manager_action_meanings: list[tuple[int, str]] = []
+        # Patch choices.
+        self._manager_action_meanings += [(0, wid) for wid in self.worker_ids]
+        # Migrate/Block/No-op all map to migration worker.
+        self._manager_action_meanings += [(1, self.worker_mig_id)]
+        self._manager_action_meanings += [(2, self.worker_mig_id)]
+        self._manager_action_meanings += [(3, self.worker_mig_id)]
+        self._manager_action_space = spaces.Discrete(len(self._manager_action_meanings))
 
         # All workers output a primitive action index into the baseline actionSpace.
         self._worker_action_space = spaces.Discrete(len(self.base_env.actionSpace))
@@ -340,14 +355,10 @@ class cerere_hmarl_env(AECEnv):
         self._clear_rewards()
 
         if agent == self.manager_id:
-            # Manager selects (skill, worker_idx).
-            skill = int(action[0])
-            worker_idx = int(action[1])
-            self._selected_skill = skill
-            if worker_idx < 4:
-                self._selected_worker = self.worker_ids[worker_idx]
-            else:
-                self._selected_worker = self.worker_mig_id
+            # Manager selects from the discrete list of valid (skill, worker) pairs.
+            skill, worker = self._manager_action_meanings[int(action)]
+            self._selected_skill = int(skill)
+            self._selected_worker = worker
 
             # Update worker masks for the upcoming worker steps.
             self._sync_obs_from_base()
@@ -823,6 +834,7 @@ class cerere_net_v2_env(AECEnv):
         self.agent_selection = self._agent_selector.next()
         self._accumulate_rewards()
         """
+
 
 
 
