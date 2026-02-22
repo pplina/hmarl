@@ -95,6 +95,11 @@ python3 test-marl.py --train --rwf 1  --stop_rw 0.83 --iter 100000 --scen milita
 python3 test-marl.py --eval --rwf 1  --stop_rw 0.83 --iter 100000 --scen military --path2tar  /home/ubuntu/src/rl-test/ppo_mil_rllib_marl
 ```
 
+# NewCERERE + HMARL
+```
+python3 test-marl.py --train_hmarl --scen enterprise --rwf 1 --iter 10000 --stop_rw 999 --path2tar ./exp_hmarl_ppo
 
+python3 test-marl.py --eval_hmarl --scen enterprise --rwf 1 --eval_episodes 100 --eval_seed 100 --path2tar ./exp_hmarl_ppo
+```
 
 

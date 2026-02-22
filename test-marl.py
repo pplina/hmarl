@@ -703,6 +703,298 @@ def eval_model2(
 ###### Eval2 End
 
 
+def eval_model2_forced_configs(
+    in_scenario: str,
+    path2tar: str,
+    in_rwf: int,
+    configs: list[str] = ["C1", "C2", "C3"],
+    n_episodes_per_cfg: int = 20,
+    base_seed: int = 42,
+    verbose: bool = False,
+    deterministic: bool = True,
+):
+
+    env_kwargs = dict(render_mode=None, rw_func=in_rwf, scenario=in_scenario)
+    env = cerere_net_v2.env(**env_kwargs)
+
+    if not ray.is_initialized():
+        ray.init(ignore_reinit_error=True)
+
+    ckpt = _resolve_checkpoint_path(path2tar)
+    rl_module = RLModule.from_checkpoint(
+        _to_file_uri(
+            os.path.join(
+                ckpt,
+                "learner_group",
+                "learner",
+                "rl_module",
+                "p1",
+            )
+        )
+    )
+
+    results = {}
+    for cfg in configs:
+        rets: list[float] = []
+        succs: list[int] = []
+        for ep in range(n_episodes_per_cfg):
+            seed = base_seed + ep
+            env.reset(seed=seed, options={"config_key": cfg})
+
+            ep_returns = {agent: 0.0 for agent in env.possible_agents}
+            for agent in env.agent_iter():
+                observation, reward, termination, truncation, info = env.last()
+                ep_returns[agent] += float(reward)
+                if termination or truncation:
+                    action = None
+                else:
+                    if agent == env.possible_agents[0]:
+                        action = env.action_space(agent).sample()
+                    else:
+                        input_dict = {Columns.OBS: torch.from_numpy(observation).unsqueeze(0)}
+                        out = rl_module.forward_inference(input_dict)
+                        logits = convert_to_numpy(out[Columns.ACTION_DIST_INPUTS])[0]
+                        if deterministic:
+                            action = int(np.argmax(logits))
+                        else:
+                            action = int(
+                                np.random.choice(
+                                    env.action_space(agent).n, p=softmax(logits)
+                                )
+                            )
+                env.step(action)
+
+            crit = getattr(env.unwrapped, "critserver", None)
+            nwstate = getattr(env.unwrapped, "nwstate", None)
+            success = 0 if (crit is not None and nwstate is not None and [1, crit] in nwstate) else 1
+            ret = float(ep_returns.get("player_1", 0.0))
+            rets.append(ret)
+            succs.append(success)
+            if verbose:
+                print(f"baseline cfg={cfg} ep={ep} seed={seed} return={ret:.4f} success={success}")
+
+        results[cfg] = {
+            "n": len(rets),
+            "mean_return": float(sum(rets) / len(rets)) if rets else float("nan"),
+            "success_rate": float(sum(succs) / len(succs)) if succs else float("nan"),
+        }
+
+    env.close()
+    return results
+
+
+def eval_hmarl_forced_configs(
+    in_scenario: str,
+    path2tar: str,
+    in_rwf: int,
+    configs: list[str] = ["C1", "C2", "C3"],
+    n_episodes_per_cfg: int = 20,
+    base_seed: int = 42,
+):
+
+    env_kwargs = dict(render_mode=None, rw_func=in_rwf, scenario=in_scenario)
+    register_env(
+        "pettingzoo_cerere_hmarl",
+        lambda env_config: PettingZooEnv(cerere_net_v2.hmarl_env(**env_kwargs)),
+    )
+
+    if not ray.is_initialized():
+        ray.init(ignore_reinit_error=True)
+
+    tmp_path = "./tb_log/"
+    os.makedirs(tmp_path, exist_ok=True)
+
+    policies = {
+        "pi_manager",
+        "pi_worker_0",
+        "pi_worker_1",
+        "pi_worker_2",
+        "pi_worker_3",
+        "pi_worker_mig",
+    }
+
+    def policy_mapping_fn(agent_id, episode, **kwargs):
+        if agent_id == "manager":
+            return "pi_manager"
+        if agent_id.startswith("worker_"):
+            return f"pi_{agent_id}"
+        if agent_id == "worker_mig":
+            return "pi_worker_mig"
+        raise ValueError(f"Unknown HMARL agent_id: {agent_id}")
+
+    eval_config = (
+        PPOConfig()
+        .environment("pettingzoo_cerere_hmarl")
+        .env_runners(num_env_runners=0)
+        .multi_agent(
+            policies=policies,
+            policy_mapping_fn=policy_mapping_fn,
+            policies_to_train=list(policies),
+        )
+        .rl_module(
+            rl_module_spec=MultiRLModuleSpec(
+                rl_module_specs={
+                    "pi_manager": RLModuleSpec(),
+                    "pi_worker_0": RLModuleSpec(module_class=ActionMaskingTorchRLModule),
+                    "pi_worker_1": RLModuleSpec(module_class=ActionMaskingTorchRLModule),
+                    "pi_worker_2": RLModuleSpec(module_class=ActionMaskingTorchRLModule),
+                    "pi_worker_3": RLModuleSpec(module_class=ActionMaskingTorchRLModule),
+                    "pi_worker_mig": RLModuleSpec(module_class=ActionMaskingTorchRLModule),
+                }
+            )
+        )
+        .debugging(log_level="ERROR", logger_creator=custom_logger_creator(tmp_path, "ppo_cerere_hmarl"))
+        .framework(framework="torch")
+    )
+
+    algo = eval_config.build_algo()
+    ckpt = _resolve_checkpoint_path(path2tar)
+    algo.restore_from_path(_to_file_uri(ckpt))
+
+    out = {}
+    for cfg in configs:
+        algo.get_config().evaluation_config = {
+            "explore": False,
+            "seed": base_seed,
+            "env_options": {"config_key": cfg},
+        }
+        algo.get_config().evaluation_duration_unit = "episodes"
+        algo.get_config().evaluation_duration = n_episodes_per_cfg
+        r = algo.evaluate()
+        mean_ret = r.get("env_runners", {}).get("episode_return_mean")
+        out[cfg] = {
+            "n": n_episodes_per_cfg,
+            "mean_return": float(mean_ret) if mean_ret is not None else None,
+        }
+
+    return out
+
+
+def eval_hmarl_manual_forced_configs(
+    in_scenario: str,
+    path2tar: str,
+    in_rwf: int,
+    configs: list[str] = ["C1", "C2", "C3"],
+    n_episodes_per_cfg: int = 20,
+    base_seed: int = 42,
+    deterministic: bool = True,
+):
+
+    env = cerere_net_v2.hmarl_env(render_mode=None, rw_func=in_rwf, scenario=in_scenario)
+    ckpt = _resolve_checkpoint_path(path2tar)
+
+    # Load all policies
+    def _load_module(policy_id: str) -> RLModule:
+        return RLModule.from_checkpoint(
+            _to_file_uri(
+                os.path.join(
+                    ckpt,
+                    "learner_group",
+                    "learner",
+                    "rl_module",
+                    policy_id,
+                )
+            )
+        )
+
+    modules = {
+        "pi_manager": _load_module("pi_manager"),
+        "pi_worker_0": _load_module("pi_worker_0"),
+        "pi_worker_1": _load_module("pi_worker_1"),
+        "pi_worker_2": _load_module("pi_worker_2"),
+        "pi_worker_3": _load_module("pi_worker_3"),
+        "pi_worker_mig": _load_module("pi_worker_mig"),
+    }
+
+    def policy_for_agent(agent_id: str) -> str:
+        if agent_id == "manager":
+            return "pi_manager"
+        if agent_id.startswith("worker_"):
+            return f"pi_{agent_id}"
+        if agent_id == "worker_mig":
+            return "pi_worker_mig"
+        raise ValueError(f"Unknown HMARL agent_id={agent_id}")
+
+    def pick_action(mod: RLModule, obs, action_space):
+        # obs may be dict (workers) or np array (manager)
+        if isinstance(obs, dict):
+            obs_t = {
+                "observations": torch.from_numpy(obs["observations"]).unsqueeze(0),
+                "action_mask": torch.from_numpy(obs["action_mask"]).unsqueeze(0),
+            }
+            input_dict = {Columns.OBS: obs_t}
+        else:
+            input_dict = {Columns.OBS: torch.from_numpy(obs).unsqueeze(0)}
+
+        out = mod.forward_inference(input_dict)
+        logits = convert_to_numpy(out[Columns.ACTION_DIST_INPUTS])[0]
+
+        if isinstance(action_space, gymnasium.spaces.MultiDiscrete):
+            nvec = list(action_space.nvec)
+            idx = 0
+            action = []
+            for n in nvec:
+                seg = logits[idx : idx + n]
+                if deterministic:
+                    action.append(int(np.argmax(seg)))
+                else:
+                    action.append(int(np.random.choice(n, p=softmax(seg))))
+                idx += n
+            return np.array(action, dtype=np.int64)
+
+        if deterministic:
+            return int(np.argmax(logits))
+        return int(np.random.choice(action_space.n, p=softmax(logits)))
+
+    out = {}
+    for cfg in configs:
+        rets = []
+        succs = []
+
+        for ep in range(n_episodes_per_cfg):
+            seed = base_seed + ep
+            env.reset(seed=seed, options={"config_key": cfg})
+            ep_returns = {aid: 0.0 for aid in env.possible_agents}
+
+            for agent in env.agent_iter():
+                obs, reward, termination, truncation, info = env.last()
+                ep_returns[agent] += float(reward)
+                if termination or truncation:
+                    action = None
+                else:
+                    pid = policy_for_agent(agent)
+                    action = pick_action(modules[pid], obs, env.action_space(agent))
+                env.step(action)
+
+            crit = getattr(env.unwrapped.base_env, "critserver", None)
+            nwstate = getattr(env.unwrapped.base_env, "nwstate", None)
+            success = 0 if (crit is not None and nwstate is not None and [1, crit] in nwstate) else 1
+            rets.append(float(ep_returns.get("manager", 0.0)))
+            succs.append(success)
+
+        out[cfg] = {
+            "n": len(rets),
+            "mean_return": float(sum(rets) / len(rets)) if rets else float("nan"),
+            "success_rate": float(sum(succs) / len(succs)) if succs else float("nan"),
+        }
+
+    env.close()
+    return out
+
+
+def print_comparison_table(baseline: dict, hmarl: dict, title: str = "Baseline vs HMARL"):
+    print("\n" + title)
+    print("cfg\tbaseline_mean\tbaseline_succ\thmarl_mean\thmarl_succ")
+    for cfg in ["C1", "C2", "C3"]:
+        b = baseline.get(cfg, {})
+        h = hmarl.get(cfg, {})
+        print(
+            f"{cfg}\t"
+            f"{b.get('mean_return', float('nan')):.4f}\t\t{b.get('success_rate', float('nan')):.3f}\t\t"
+            f"{h.get('mean_return', float('nan')):.4f}\t\t{h.get('success_rate', float('nan')):.3f}"
+        )
+
+
 ###### Test Begin
 def test(in_render_mode, in_scenario):	
 

@@ -576,9 +576,19 @@ class cerere_net_v2_env(AECEnv):
 
         # Sample one of the patterns on reset (only for enterprise yet)
         if hasattr(self, "topologies_by_config"):
-            if seed is not None:
-                random.seed(seed)
-            self.selected_config_key = random.choice(self.config_keys)
+            forced = None
+            if isinstance(options, dict):
+                forced = options.get("config_key") or options.get("config")
+            if forced is not None:
+                if forced not in self.topologies_by_config:
+                    raise ValueError(
+                        f"Unknown enterprise config_key={forced}. Allowed: {list(self.topologies_by_config.keys())}"
+                    )
+                self.selected_config_key = forced
+            else:
+                if seed is not None:
+                    random.seed(seed)
+                self.selected_config_key = random.choice(self.config_keys)
             self.topology = self.topologies_by_config[self.selected_config_key]
 
         self.netgraph = nx.Graph()
