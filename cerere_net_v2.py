@@ -88,9 +88,14 @@ class cerere_hmarl_env(AECEnv):
         self.possible_agents = [self.manager_id] + self.worker_ids + [self.worker_mig_id]
         self.agents = []
 
-        # Manager selects (skill, worker_idx)
+        # Manager selects from a valid set of (skill, worker) combinations        #
         self.num_skills = int(num_skills)
-        self._manager_action_space = spaces.MultiDiscrete([self.num_skills, 5])
+        self._manager_action_meanings: list[tuple[int, str]] = []
+        self._manager_action_meanings += [(0, wid) for wid in self.worker_ids]
+        self._manager_action_meanings += [(1, self.worker_mig_id)]
+        self._manager_action_meanings += [(2, self.worker_mig_id)]
+        self._manager_action_meanings += [(3, self.worker_mig_id)]
+        self._manager_action_space = spaces.Discrete(len(self._manager_action_meanings))
 
         # All workers output a primitive action index
         self._worker_action_space = spaces.Discrete(len(self.base_env.actionSpace))
@@ -267,14 +272,9 @@ class cerere_hmarl_env(AECEnv):
         self._clear_rewards()
 
         if agent == self.manager_id:
-            # Manager selects (skill, worker_idx)
-            skill = int(action[0])
-            worker_idx = int(action[1])
-            self._selected_skill = skill
-            if worker_idx < 4:
-                self._selected_worker = self.worker_ids[worker_idx]
-            else:
-                self._selected_worker = self.worker_mig_id
+            skill, worker = self._manager_action_meanings[int(action)]
+            self._selected_skill = int(skill)
+            self._selected_worker = worker
 
             # Update worker masks for the upcoming worker steps
             self._sync_obs_from_base()
@@ -302,8 +302,10 @@ class cerere_hmarl_env(AECEnv):
 
                 defender_reward = float(self.base_env.rewards.get("player_1", 0.0))
 
-                for aid in self.agents:
-                    self.rewards[aid] = defender_reward
+                # Only manager + selected worker receive the reward
+                # Non-selected workers get 0.0 to avoid training on unrelated signal
+                self.rewards[self.manager_id] = defender_reward
+                self.rewards[agent] = defender_reward
 
                 # Sync observation and done flags
                 self._sync_obs_from_base()
