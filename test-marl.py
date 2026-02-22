@@ -620,6 +620,32 @@ def test_parallel(in_render_mode, in_scenario):
 ###### Test_parallel End
 
 
+def test_hmarl(in_scenario: str, rwf: int, max_env_cycles: int = 300):
+    """Smoke test for the HMARL PettingZoo env without RLlib.
+
+    Runs a single episode with random manager + random workers and ensures the
+    episode terminates.
+    """
+    env = cerere_net_v2.hmarl_env(render_mode=None, rw_func=rwf, scenario=in_scenario)
+    env.reset(seed=123)
+
+    cycles = 0
+    for agent in env.agent_iter():
+        obs, reward, termination, truncation, info = env.last()
+        if termination or truncation:
+            action = None
+        else:
+            action = env.action_space(agent).sample()
+        env.step(action)
+        cycles += 1
+        if cycles > max_env_cycles:
+            raise RuntimeError(
+                f"HMARL smoke test exceeded max cycles ({max_env_cycles}); likely stuck."
+            )
+
+    env.close()
+
+
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
@@ -627,6 +653,7 @@ if __name__ == "__main__":
     parser.add_argument('--eval', help="Eval a trained model in the specified env", action="store_true")
     parser.add_argument('--train', help="Train model in the specified env", action="store_true")
     parser.add_argument('--trainWithTune', help="Train with ray tune model in the specified env", action="store_true")
+    parser.add_argument('--test_hmarl', help="Smoke-test HMARL env (no RLlib)", action="store_true")
     parser.add_argument('--iter', type=int, default=50000,
                         help='Number of trainings iterations (ent=100000/mil=100000) , default = 50000')
     parser.add_argument('--stop_rw', type=float, default=0.1,
@@ -685,3 +712,11 @@ if __name__ == "__main__":
         print("Stop train model with Tune in env %s after %s" % (ENVIRONMENT, elapsed))
     else:
         print("Do not know what to do in env %s" % ENVIRONMENT)
+
+    if args.test_hmarl:
+        print("HMARL smoke test in scenario %s" % SCENARIO)
+        start = datetime.datetime.now().replace(microsecond=0)
+        test_hmarl(SCENARIO, args.rwf)
+        end = datetime.datetime.now().replace(microsecond=0)
+        elapsed = end - start
+        print("HMARL smoke test done after %s" % elapsed)

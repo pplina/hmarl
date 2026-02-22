@@ -28,7 +28,13 @@ NOTYPE_ACTION = 0
 ATTACK_ACTION = 1
 DEFENSE_ACTION = 2
 
-__all__ = ["env", "parallel_env", "cerere_net_v2_env"]
+__all__ = [
+    "env",
+    "parallel_env",
+    "cerere_net_v2_env",
+    "hmarl_env",
+    "cerere_hmarl_env",
+]
 
 
 def env(**kwargs):
@@ -38,7 +44,183 @@ def env(**kwargs):
     return env
 
 
+# Hierarchical MARL PettingZoo env variant
+def hmarl_env(**kwargs):
+    env = cerere_hmarl_env(**kwargs)
+    env = wrappers.AssertOutOfBoundsWrapper(env)
+    env = wrappers.OrderEnforcingWrapper(env)
+    return env
+
+
 parallel_env = parallel_wrapper_fn(env)
+hmarl_parallel_env = parallel_wrapper_fn(hmarl_env)
+
+
+def _make_base_env(render_mode: str | None, rw_func: int | None, scenario: str | None):
+    return cerere_net_v2_env(render_mode=render_mode, rw_func=rw_func, scenario=scenario)
+
+
+# HMARL wiring layer around the existing CERERE environment
+class cerere_hmarl_env(AECEnv):
+
+    metadata = {
+        "render_modes": ["human"],
+        "name": "cerere_hmarl_env",
+        "is_parallelizable": True,
+    }
+
+    def __init__(
+        self,
+        render_mode: str | None = None,
+        rw_func: int | None = 1,
+        scenario: str | None = "military",
+        num_skills: int = 4,
+    ):
+        super().__init__()
+        self.render_mode = render_mode
+
+        self.base_env = _make_base_env(render_mode=None, rw_func=rw_func, scenario=scenario)
+
+        # HMARL agents
+        self.manager_id = "manager"
+        self.worker_ids = [f"worker_{i}" for i in range(4)]
+        self.worker_mig_id = "worker_mig"
+        self.possible_agents = [self.manager_id] + self.worker_ids + [self.worker_mig_id]
+        self.agents = []
+
+        # Manager selects (skill, worker_idx)
+        self.num_skills = int(num_skills)
+        self._manager_action_space = spaces.MultiDiscrete([self.num_skills, 5])
+
+        # All workers output a primitive action index
+        self._worker_action_space = spaces.Discrete(len(self.base_env.actionSpace))
+
+        self._action_spaces = {self.manager_id: self._manager_action_space}
+        for wid in self.worker_ids + [self.worker_mig_id]:
+            self._action_spaces[wid] = self._worker_action_space
+
+        # Observation is global state for all agents
+        self._observation_spaces = {
+            aid: spaces.Box(
+                0, 1, shape=(len(self.base_env.flatState),), dtype=np.float32
+            )
+            for aid in self.possible_agents
+        }
+
+        # Internal HMARL control state
+        self._selected_worker: str | None = None
+        self._selected_skill: int | None = None
+
+    @functools.lru_cache(maxsize=None)
+    def observation_space(self, agent):
+        return self._observation_spaces[agent]
+
+    @functools.lru_cache(maxsize=None)
+    def action_space(self, agent):
+        return self._action_spaces[agent]
+
+    def render(self):
+        if self.render_mode != "human":
+            return
+        self.base_env.render_mode = "human"
+        self.base_env.render()
+        self.base_env.render_mode = None
+
+    def observe(self, agent):
+        return np.array(self.observations[agent], dtype=np.float32)
+
+    def close(self):
+        self.base_env.close()
+
+    def reset(self, seed=None, options=None):
+        self.base_env.reset(seed=seed, options=options)
+
+        self.agents = self.possible_agents[:]
+        self._agent_selector = AgentSelector(self.agents)
+        self.agent_selection = self._agent_selector.next()
+
+        self.rewards = {agent: 0.0 for agent in self.agents}
+        self._cumulative_rewards = {agent: 0.0 for agent in self.agents}
+        self.terminations = {agent: False for agent in self.agents}
+        self.truncations = {agent: False for agent in self.agents}
+        base_info = {}
+        try:
+            base_info = dict(self.base_env.infos.get("player_0", {}))
+        except Exception:
+            base_info = {}
+        self.infos = {agent: dict(base_info) for agent in self.agents}
+
+        obs = np.array(self.base_env.flatState, dtype=np.float32)
+        self.observations = {agent: obs for agent in self.agents}
+        self.state = {agent: None for agent in self.agents}
+
+        # Reset HMARL control variables
+        self._selected_worker = None
+        self._selected_skill = None
+
+    def _sync_obs_from_base(self):
+        obs = np.array(self.base_env.flatState, dtype=np.float32)
+        for agent in self.agents:
+            self.observations[agent] = obs
+
+    def step(self, action):
+        # If already done for this agent, do dead step
+        if self.terminations[self.agent_selection] or self.truncations[self.agent_selection]:
+            self._was_dead_step(action)
+            return
+
+        agent = self.agent_selection
+        self.state[agent] = action
+        self._cumulative_rewards[agent] = 0.0
+
+        # Default: no rewards unless we trigger a real transition
+        self._clear_rewards()
+
+        if agent == self.manager_id:
+            # Manager selects (skill, worker_idx)
+            skill = int(action[0])
+            worker_idx = int(action[1])
+            self._selected_skill = skill
+            if worker_idx < 4:
+                self._selected_worker = self.worker_ids[worker_idx]
+            else:
+                self._selected_worker = self.worker_mig_id
+
+            # No environment dynamics on manager step
+            self.rewards[agent] = 0.0
+
+        else:
+            # Worker steps
+            if self._selected_worker is None:
+                # If manager hasn't acted yet, ignore
+                self.rewards[agent] = 0.0
+            elif agent != self._selected_worker:
+                # Non-selected worker: no-op
+                self.rewards[agent] = 0.0
+            else:
+                self.base_env.agent_selection = "player_0"
+                self.base_env.step(self.base_env.action_space("player_0").sample())
+                self.base_env.agent_selection = "player_1"
+                self.base_env.step(int(action))
+
+                defender_reward = float(self.base_env.rewards.get("player_1", 0.0))
+
+                for aid in self.agents:
+                    self.rewards[aid] = defender_reward
+
+                # Sync observation and done flags
+                self._sync_obs_from_base()
+                done = any(self.base_env.truncations.values()) or any(
+                    self.base_env.terminations.values()
+                )
+                if done:
+                    self.truncations = {aid: True for aid in self.agents}
+
+        self._accumulate_rewards()
+        self.agent_selection = self._agent_selector.next()
+
+        if self.render_mode == "human":
+            self.render()
 
 
 class cerere_net_v2_env(AECEnv):
