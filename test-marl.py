@@ -25,12 +25,11 @@ from ray.tune.logger import UnifiedLogger
 from ray.rllib.core.rl_module.rl_module import RLModuleSpec
 from ray.rllib.core.rl_module.default_model_config import DefaultModelConfig
 from ray.rllib.core.rl_module.multi_rl_module import MultiRLModuleSpec
-#from ray.rllib.examples.rl_modules.classes.random_rlm import RandomRLModule
-#from ray.rllib.examples.rl_modules.classes import (
+# from ray.rllib.examples.rl_modules.classes.random_rlm import RandomRLModule
+# from ray.rllib.examples.rl_modules.classes import (
 #    AlwaysSameHeuristicRLM,
 #    BeatLastHeuristicRLM,
-#)
-from ray.rllib.examples.rl_modules.classes.random_rlm import RandomRLModule
+# )
 from ray.rllib.examples.rl_modules.classes.action_masking_rlm import (
     ActionMaskingTorchRLModule,
 )
