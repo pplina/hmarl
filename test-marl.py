@@ -294,7 +294,7 @@ def train_model_with_tune(iterations, stop_rw, env_name, scenario_name, path2tar
                 }
             ),
         )
-        .debugging(log_level="DEBUG", logger_creator=custom_logger_creator(tmp_path, "ppo_cerere"))
+        .debugging(log_level="ERROR", logger_creator=custom_logger_creator(tmp_path, "ppo_cerere"))
         .framework(framework="torch")
     )
 
@@ -432,7 +432,15 @@ def eval_model(in_render_mode, in_scenario, path2tar, in_rwf):
 
 
 ###### Eval2 Begin
-def eval_model2(in_render_mode, in_scenario, path2tar, in_rwf):
+def eval_model2(
+    in_render_mode,
+    in_scenario,
+    path2tar,
+    in_rwf,
+    n_episodes: int = 60,
+    base_seed: int = 42,
+    verbose: bool = False,
+):
 
     env_kwargs = dict(render_mode=None, rw_func=in_rwf, scenario=in_scenario)
 
@@ -469,59 +477,66 @@ def eval_model2(in_render_mode, in_scenario, path2tar, in_rwf):
     i = 0
 
     by_cfg = {}
+    by_cfg_returns: dict[int, list[float]] = {}
+    by_cfg_success: dict[int, list[int]] = {}
 
     for i in range(n_episodes):
-        print("######################### Test Round %d ########################" % (i + 1))
-        env.reset(seed=42 + i)
+        env.reset(seed=base_seed + i)
         cfg_key = getattr(env.unwrapped, "selected_config_key", None)
         cfg_id = env.infos[env.possible_agents[0]].get("config_id") if env.infos else None
 
+        # Episode return per agent
+        ep_returns = {agent: 0.0 for agent in env.possible_agents}
+
         for agent in env.agent_iter():
             observation, reward, termination, truncation, info = env.last()
-            #print(f" Observations {observation}")
+            ep_returns[agent] += float(reward)
 
             if termination or truncation:
                 action = None
-                print("Agent %s do None" % (str(agent)))
             else:
-                #action = env.action_space(agent).sample()
                 if agent == env.possible_agents[0]:
-                    #action = env.action_space(agent).sample()
-                    action = ham.manual_forward()
-                    print("AGENT %s attempted to do %d" % (str(agent), action))
-                else: 
-                    #action = env.action_space(agent).sample()
+                    # Attacker/other player is random (baseline)
+                    action = env.action_space(agent).sample()
+                else:
                     input_dict = {Columns.OBS: torch.from_numpy(observation).unsqueeze(0)}
                     rl_module_out = rl_module.forward_inference(input_dict)
                     logits = convert_to_numpy(rl_module_out[Columns.ACTION_DIST_INPUTS])
-                    # Perform the sampling step in numpy for simplicity.
-                    # action = np.random.choice(env.action_space(agent).n, p=softmax(logits[0]))
-                    # Select action without exploration
-                    action = np.argmax(softmax(logits[0]))
-                    print("AGENT %s attempted do %d" % (str(agent), action))         
-            env.step(action)          
+                    action = int(
+                        np.random.choice(env.action_space(agent).n, p=softmax(logits[0]))
+                    )
 
-            if agent == env.possible_agents[-1]:
-                for a in env.agents:
-                    myrewards[a] += env.rewards[a]
-                    print("Agent %s, Reward %f" % (str(a), env.rewards[a]))
-                print("+++++++++++ Both agents have played +++++++++++")  
+            env.step(action)
 
-        # Episode finished once all agents are done
-        # Add reward by config
-        ep_avg_reward = sum(myrewards.values()) / len(myrewards.values())
+        # Success criterion: critical server not infected at episode end
+        crit = getattr(env.unwrapped, "critserver", None)
+        nwstate = getattr(env.unwrapped, "nwstate", None)
+        success = 0
+        if crit is not None and nwstate is not None:
+            success = 0 if [1, crit] in nwstate else 1
+
+        # Consider player_1 as the defender policy
+        ep_ret_def = float(ep_returns.get("player_1", 0.0))
+
+        if verbose:
+            print(
+                f"Episode {i+1:03d}: cfg={cfg_key} (id={cfg_id}) return={ep_ret_def:.4f} success={success}"
+            )
+
         if cfg_id is not None:
-            by_cfg.setdefault(int(cfg_id), []).append(float(ep_avg_reward))
-        print(f"Episode config: {cfg_key} (id={cfg_id}), avg_reward={ep_avg_reward}")
+            cid = int(cfg_id)
+            by_cfg_returns.setdefault(cid, []).append(ep_ret_def)
+            by_cfg_success.setdefault(cid, []).append(success)
 
-    myavg_reward = sum(myrewards.values()) / len(myrewards.values())
-    print("Rewards: ", myrewards)
-    print(f"Avg reward: {myavg_reward}")
-    if by_cfg:
-        print("Avg reward per config_id:")
-        for cid in sorted(by_cfg):
-            vals = by_cfg[cid]
-            print(f"  C{cid+1}: n={len(vals)}, mean={sum(vals)/len(vals):.4f}")
+    print("\nPer-config evaluation (defender=player_1)")
+    print("config\tn\tmean_return\tsuccess_rate")
+    for cid in sorted(by_cfg_returns):
+        rets = by_cfg_returns[cid]
+        succ = by_cfg_success.get(cid, [])
+        mean_ret = sum(rets) / len(rets) if rets else float("nan")
+        succ_rate = (sum(succ) / len(succ)) if succ else float("nan")
+        print(f"C{cid+1}\t{len(rets)}\t{mean_ret:.4f}\t\t{succ_rate:.3f}")
+
     env.close()
 ###### Eval2 End
 
@@ -618,6 +633,10 @@ if __name__ == "__main__":
                         help='Mean reward to stop the training (ent=0.64 ent/ mil=0.83 mil), default = 0.1')
     parser.add_argument('--rwf', type=int, default=1,
                         help='Used reward function (iso-patch=1/bt=2) , default = 1')   
+    parser.add_argument('--eval_episodes', type=int, default=60,
+                        help='Number of evaluation episodes (enterprise uses multi-config reset). Default=60')
+    parser.add_argument('--eval_seed', type=int, default=42,
+                        help='Base seed for evaluation episode resets. Default=42')
     parser.add_argument('--path2tar', type=str, default=os.getcwd() + 'targetmodel_ai_gym.pt',
                         help='Path to the neural network')
     parser.add_argument('--scen', type=str, default='none',
@@ -638,7 +657,15 @@ if __name__ == "__main__":
         print("Eval model in env %s, scenario %s" % (ENVIRONMENT, SCENARIO))
         start = datetime.datetime.now().replace(microsecond=0)
         #eval_model("human", SCENARIO, args.path2tar, args.rwf)
-        eval_model2("human", SCENARIO, args.path2tar, args.rwf)
+        eval_model2(
+            "human",
+            SCENARIO,
+            args.path2tar,
+            args.rwf,
+            n_episodes=args.eval_episodes,
+            base_seed=args.eval_seed,
+            verbose=False,
+        )
         end = datetime.datetime.now().replace(microsecond=0)
         elapsed = end - start
         print("Stop eval model in env %s after %s" % (ENVIRONMENT, elapsed))
