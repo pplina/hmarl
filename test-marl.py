@@ -303,11 +303,11 @@ def train_hmarl(iterations, stop_rw, scenario_name, path2tar, rwf):
             rl_module_spec=MultiRLModuleSpec(
                 rl_module_specs={
                     "pi_manager": RLModuleSpec(),
-                    "pi_worker_0": RLModuleSpec(),
-                    "pi_worker_1": RLModuleSpec(),
-                    "pi_worker_2": RLModuleSpec(),
-                    "pi_worker_3": RLModuleSpec(),
-                    "pi_worker_mig": RLModuleSpec(),
+                    "pi_worker_0": RLModuleSpec(module_class=ActionMaskingTorchRLModule),
+                    "pi_worker_1": RLModuleSpec(module_class=ActionMaskingTorchRLModule),
+                    "pi_worker_2": RLModuleSpec(module_class=ActionMaskingTorchRLModule),
+                    "pi_worker_3": RLModuleSpec(module_class=ActionMaskingTorchRLModule),
+                    "pi_worker_mig": RLModuleSpec(module_class=ActionMaskingTorchRLModule),
                 }
             )
         )
@@ -374,7 +374,14 @@ def eval_hmarl(in_scenario, path2tar, in_rwf, n_episodes: int = 10, base_seed: i
         )
         .rl_module(
             rl_module_spec=MultiRLModuleSpec(
-                rl_module_specs={pid: RLModuleSpec() for pid in policies}
+                rl_module_specs={
+                    "pi_manager": RLModuleSpec(),
+                    "pi_worker_0": RLModuleSpec(module_class=ActionMaskingTorchRLModule),
+                    "pi_worker_1": RLModuleSpec(module_class=ActionMaskingTorchRLModule),
+                    "pi_worker_2": RLModuleSpec(module_class=ActionMaskingTorchRLModule),
+                    "pi_worker_3": RLModuleSpec(module_class=ActionMaskingTorchRLModule),
+                    "pi_worker_mig": RLModuleSpec(module_class=ActionMaskingTorchRLModule),
+                }
             )
         )
         .debugging(log_level="ERROR", logger_creator=custom_logger_creator(tmp_path, "ppo_cerere_hmarl"))

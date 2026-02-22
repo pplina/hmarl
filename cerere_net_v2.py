@@ -99,17 +99,33 @@ class cerere_hmarl_env(AECEnv):
         for wid in self.worker_ids + [self.worker_mig_id]:
             self._action_spaces[wid] = self._worker_action_space
 
-        # Observation is global state for all agents
-        self._observation_spaces = {
-            aid: spaces.Box(
-                0, 1, shape=(len(self.base_env.flatState),), dtype=np.float32
-            )
-            for aid in self.possible_agents
-        }
+        # manager obs is a plain Box(flatState)
+        # workers obs is Dict({"observations": flatState, "action_mask": mask})
+        base_box = spaces.Box(
+            0, 1, shape=(len(self.base_env.flatState),), dtype=np.float32
+        )
+        mask_box = spaces.Box(
+            0.0,
+            1.0,
+            shape=(self._worker_action_space.n,),
+            dtype=np.float32,
+        )
+        worker_dict = spaces.Dict({"observations": base_box, "action_mask": mask_box})
+        self._observation_spaces = {self.manager_id: base_box}
+        for wid in self.worker_ids + [self.worker_mig_id]:
+            self._observation_spaces[wid] = worker_dict
 
         # Internal HMARL control state
         self._selected_worker: str | None = None
         self._selected_skill: int | None = None
+
+        self._subnets: list[list[str]] = self._compute_subnets_deterministic(
+            self.base_env.netgraph
+        )
+        self._worker_subnet_nodes: dict[str, set[str]] = {
+            wid: set(self._subnets[i]) for i, wid in enumerate(self.worker_ids)
+        }
+        self._worker_subnet_nodes[self.worker_mig_id] = set(self.base_env.topology.keys())
 
     @functools.lru_cache(maxsize=None)
     def observation_space(self, agent):
@@ -127,7 +143,14 @@ class cerere_hmarl_env(AECEnv):
         self.base_env.render_mode = None
 
     def observe(self, agent):
-        return np.array(self.observations[agent], dtype=np.float32)
+        obs = self.observations[agent]
+        # Dict obs for workers (action masking)
+        if isinstance(obs, dict):
+            return {
+                "observations": np.array(obs["observations"], dtype=np.float32),
+                "action_mask": np.array(obs["action_mask"], dtype=np.float32),
+            }
+        return np.array(obs, dtype=np.float32)
 
     def close(self):
         self.base_env.close()
@@ -150,18 +173,85 @@ class cerere_hmarl_env(AECEnv):
             base_info = {}
         self.infos = {agent: dict(base_info) for agent in self.agents}
 
-        obs = np.array(self.base_env.flatState, dtype=np.float32)
-        self.observations = {agent: obs for agent in self.agents}
-        self.state = {agent: None for agent in self.agents}
+        # Recompute subnets after reset
+        self._subnets = self._compute_subnets_deterministic(self.base_env.netgraph)
+        self._worker_subnet_nodes = {
+            wid: set(self._subnets[i]) for i, wid in enumerate(self.worker_ids)
+        }
+        self._worker_subnet_nodes[self.worker_mig_id] = set(self.base_env.topology.keys())
 
         # Reset HMARL control variables
         self._selected_worker = None
         self._selected_skill = None
 
+        # Set observations
+        base_obs = np.array(self.base_env.flatState, dtype=np.float32)
+        self.observations = {}
+        self.observations[self.manager_id] = base_obs
+        for wid in self.worker_ids + [self.worker_mig_id]:
+            self.observations[wid] = {
+                "observations": base_obs,
+                "action_mask": self._compute_action_mask(wid),
+            }
+        self.state = {agent: None for agent in self.agents}
+
     def _sync_obs_from_base(self):
-        obs = np.array(self.base_env.flatState, dtype=np.float32)
-        for agent in self.agents:
-            self.observations[agent] = obs
+        base_obs = np.array(self.base_env.flatState, dtype=np.float32)
+        self.observations[self.manager_id] = base_obs
+        for wid in self.worker_ids + [self.worker_mig_id]:
+            self.observations[wid] = {
+                "observations": base_obs,
+                "action_mask": self._compute_action_mask(wid),
+            }
+
+    def _compute_subnets_deterministic(self, g: nx.Graph) -> list[list[str]]:
+        buckets: dict[str, list[str]] = {"s1": [], "s2": [], "s3": [], "s4": []}
+        for n in sorted(g.nodes()):
+            if isinstance(n, str) and n.startswith("s") and "_" in n:
+                pref = n.split("_", 1)[0]
+                if pref in buckets:
+                    buckets[pref].append(n)
+        subnets = [buckets["s1"], buckets["s2"], buckets["s3"], buckets["s4"]]
+
+        if sum(len(s) for s in subnets) == 0:
+            nodes = [n for n in sorted(g.nodes()) if isinstance(n, str) and n.startswith("s")]
+            subnets = [nodes[i::4] for i in range(4)]
+        return subnets
+
+    def _compute_action_mask(self, worker_id: str) -> np.ndarray:
+        n_actions = self._worker_action_space.n
+        mask = np.zeros((n_actions,), dtype=np.float32)
+
+        # Non-selected workers are forced to no-op
+        if self._selected_worker is None or worker_id != self._selected_worker:
+            mask[n_actions - 1] = 1.0
+            return mask
+
+        topo_len = len(self.base_env.topology)
+        skill = int(self._selected_skill) if self._selected_skill is not None else 3
+
+        if skill == 0:
+            # Patch indices are [0 .. topo_len-1]
+            allowed_nodes = self._worker_subnet_nodes.get(worker_id, set())
+            for i, node in enumerate(self.base_env.actionSpace[:topo_len]):
+                if node in allowed_nodes:
+                    mask[i] = 1.0
+        elif skill == 1:
+            if worker_id == self.worker_mig_id:
+                for i in range(topo_len, min(topo_len + 3, n_actions)):
+                    mask[i] = 1.0
+        elif skill == 2:
+            idx = topo_len + 3
+            if 0 <= idx < n_actions:
+                mask[idx] = 1.0
+        else:
+            idx = n_actions - 1
+            mask[idx] = 1.0
+
+        # If everything is masked out, allow no-op
+        if mask.sum() == 0:
+            mask[n_actions - 1] = 1.0
+        return mask
 
     def step(self, action):
         # If already done for this agent, do dead step
@@ -186,7 +276,10 @@ class cerere_hmarl_env(AECEnv):
             else:
                 self._selected_worker = self.worker_mig_id
 
-            # No environment dynamics on manager step
+            # Update worker masks for the upcoming worker steps
+            self._sync_obs_from_base()
+
+            # No environment dynamics on manager step.
             self.rewards[agent] = 0.0
 
         else:
@@ -198,6 +291,10 @@ class cerere_hmarl_env(AECEnv):
                 # Non-selected worker: no-op
                 self.rewards[agent] = 0.0
             else:
+                mask = self._compute_action_mask(agent)
+                if int(action) < 0 or int(action) >= len(mask) or mask[int(action)] < 0.5:
+                    action = self._worker_action_space.n - 1
+
                 self.base_env.agent_selection = "player_0"
                 self.base_env.step(self.base_env.action_space("player_0").sample())
                 self.base_env.agent_selection = "player_1"
