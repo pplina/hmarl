@@ -17,6 +17,11 @@ import attacker as attacker
 import defender as defender
 import network as network
 
+NOTYPE_ACTION = 0
+ATTACK_ACTION = 1
+DEFENSE_ACTION = 2
+
+
 #nodes = ["HQ", "M-1-1", "M-1-2", "M-1-3", "M-1-4", "M-1-5", "M-2-1", "M-2-2", "M-2-3",
 #         "M-2-4", "M-2-5"]
 #edges = [["M-1-1", "M-2-1"], ['HQ', "M-1-1"], ["M-1-1", "M-1-2"], ["M-1-2", "M-1-3"],
@@ -87,6 +92,7 @@ class CerereNet(gym.Env):
         np.set_printoptions(threshold=sys.maxsize)
         self.observation_state = np.array(self.flatState, dtype=np.float32)
         self.action_space = spaces.Discrete(len(self.actionSpace))
+        self.actualActionType = NOTYPE_ACTION
         self.actualAction = -1
 
         assert render_mode is None or render_mode in self.metadata["render_modes"]
@@ -114,12 +120,14 @@ class CerereNet(gym.Env):
 
     def _init(self):
         # Attack once in Order to achieve Initial Configuration of the Paper used
-        self.nwstate = attacker.attack(self.net, self.netgraph, self.nwstate, self.critserver, 1, self.mode, self.attackmode)
+        action = 1
+        self.nwstate = attacker.attack(self.net, self.netgraph, self.nwstate, self.critserver, action, self.mode, self.attackmode)
         self.flatState = network.getVectorFromState2(self.nwstate, self.critserver, self.netgraph)
         all_reachable_nodes, reachable_healthy_nodes, reachable_infected_nodes, healthy_nodes_no_infected_subg, self.data_ex = network.getNodeStatistic(self.critserver, self.optserver, self.topology, self.nwstate, self.netgraph, self.block_traffic)
         # print(self.state)
         self.observation_state = np.array(self.flatState, dtype=np.float32)
         # print(self.observation_state)
+        self.actualActionType = NOTYPE_ACTION
         self.actualAction = -1
 
 
@@ -147,13 +155,15 @@ class CerereNet(gym.Env):
         #print("#### Begin STEP in openAI gym ###")
         #print(self.nwstate)
         self.mystep = self.mystep + 1
+        self.actualActionType = DEFENSE_ACTION
         self.actualAction = action
         self.nwstate, self.netgraph, pFlag, self.critserver, self.optserver, self.block_traffic = defender.getAction(self.net, self.netgraph,self.critserver, self.optserver, action, self.actionSpace, self.topology, self.nwstate, self.block_traffic)
         
         if self.render_mode == "human":
              #self._render_frame()
              self.render()
-        
+       
+        # always use action = 1 (lateral movement)
         self.nwstate = attacker.attack(self.net, self.netgraph, self.nwstate, self.critserver, 1, self.mode, self.attackmode)
         # reward function
         #reward, terminated2, reachable_healthy_nodes, reachable_infected_nodes = network.getReward(self.critserver, self.optserver, self.topology, self.nwstate, pFlag, self.netgraph)
@@ -161,6 +171,7 @@ class CerereNet(gym.Env):
             reward, terminated2, reachable_healthy_nodes, reachable_infected_nodes, self.data_ex = network.getReward3(self.critserver, self.optserver, self.topology, self.nwstate, pFlag, self.netgraph, action, self.actionSpace, self.block_traffic)
         else:
             reward, terminated2, reachable_healthy_nodes, reachable_infected_nodes, self.data_ex = network.getReward2(self.critserver, self.optserver, self.topology, self.nwstate, pFlag, self.netgraph, action, self.actionSpace, self.block_traffic)
+        self.actualActionType = ATTACK_ACTION
         self.actualAction = -2
         #print(self.nwstate)
         self.flatState = network.getVectorFromState2(self.nwstate, self.critserver, self.netgraph)
@@ -179,19 +190,27 @@ class CerereNet(gym.Env):
 
 
     def render(self):
-        if self.actualAction < len(self.topology) and self.actualAction >= 0:
-            title = "Step " + str(self.mystep) + ": Isolate and patch node " + self.actionSpace[self.actualAction]
-            #title = "Isolate node " + self.actionSpace[self.actualAction]
-        elif self.actualAction >= len(self.topology) and self.actualAction < len(self.topology) + 3 and self.actualAction > 0:
-            title = "Step " + str(self.mystep) + ": Migrate crtitical server to node " + self.actionSpace[self.actualAction]
-        elif self.actualAction >= len(self.topology) + 3 and self.actualAction < len(self.topology) + 4 and self.actualAction > 0:
-            title = "Step " + str(self.mystep) + ": Block traffic"
-        elif self.actualAction == -1:
+        title = ""
+      
+        if self.actualActionType == NOTYPE_ACTION or self.actualAction == -1:
             title = "Step " + str(self.mystep) + ": Initial state"
-        elif self.actualAction == -2:
+        if self.actualActionType == ATTACK_ACTION or self.actualAction == -2:
             title = "Step " + str(self.mystep) + ": Attack"
-        else:
-            title = "Step " + str(self.mystep) + ": Do nothing"
+        
+        if self.actualActionType == DEFENSE_ACTION:
+            if self.actualAction < len(self.topology) and self.actualAction >= 0:
+                title = "Step " + str(self.mystep) + ": Isolate and patch node " + self.actionSpace[self.actualAction]
+                #title = "Isolate node " + self.actionSpace[self.actualAction]
+            elif self.actualAction >= len(self.topology) and self.actualAction < len(self.topology) + 3 and self.actualAction > 0:
+                title = "Step " + str(self.mystep) + ": Migrate crtitical server to node " + self.actionSpace[self.actualAction]
+            elif self.actualAction >= len(self.topology) + 3 and self.actualAction < len(self.topology) + 4 and self.actualAction > 0:
+                title = "Step " + str(self.mystep) + ": Block traffic"
+#            elif self.actualAction == -1:
+#               title = "Step " + str(self.mystep) + ": Initial state"
+#            elif self.actualAction == -2:
+#               title = "Step " + str(self.mystep) + ": Attack"
+            else:
+                title = "Step " + str(self.mystep) + ": Do nothing"
         plt.title(title)
         box_textstr = 'Data Ex = ' + str (self.data_ex)
         props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)

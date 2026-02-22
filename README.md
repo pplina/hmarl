@@ -86,7 +86,7 @@ python3 testRayRL.py --eval  --rwf 1  --iter 100000 --stop_rw 0.83 --env NewCere
 ######################################################################
 
 ## Usage
-2. To use the implementation execute the command lines below
+To use the implementation execute the command lines below
 
 # NewCERERE
 ```

@@ -84,6 +84,10 @@ class HeuristicAttackModule(RLModule):
         """Dummy method for compatibility with TorchRLModule.
 
         This is hit when RolloutWorker tries to compile TorchRLModule."""
+
+    def manual_forward(self):
+        action = 1
+        return action
  
 
 
@@ -408,6 +412,8 @@ def eval_model2(in_render_mode, in_scenario, path2tar, in_rwf):
     )
     print(" ok")
 
+    ham = HeuristicAttackModule()
+
     myrewards = {agent: 0 for agent in env.possible_agents}
     n_episodes = 1
     i = 0
@@ -428,7 +434,7 @@ def eval_model2(in_render_mode, in_scenario, path2tar, in_rwf):
                 #action = env.action_space(agent).sample()
                 if agent == env.possible_agents[0]:
                     #action = env.action_space(agent).sample()
-                    action = 1
+                    action = ham.manual_forward()
                     print("AGENT %s attempted to do %d" % (str(agent), action))
                 else: 
                     #action = env.action_space(agent).sample()
