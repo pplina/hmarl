@@ -89,6 +89,44 @@ class HeuristicAttackModule(RLModule):
         action = 1
         return action
  
+def _extract_cfg_id_from_infos(infos: dict) -> int | None:
+    if not infos:
+        return None
+    # RLlib generally returns infos keyed by agent_id
+    for _agent_id, info in infos.items():
+        if isinstance(info, dict) and "config_id" in info:
+            return info.get("config_id")
+    return None
+
+
+def _resolve_checkpoint_path(path: str) -> str:
+    if not path:
+        return path
+
+    if path.startswith("file://"):
+        path = path[len("file://"):]
+    if os.path.isfile(os.path.join(path, "rllib_checkpoint.json")):
+        return path
+
+    if os.path.isdir(path):
+        ckpts = [
+            os.path.join(path, d)
+            for d in os.listdir(path)
+            if d.startswith("checkpoint_") and os.path.isdir(os.path.join(path, d))
+        ]
+        ckpts = [d for d in ckpts if os.path.isfile(os.path.join(d, "rllib_checkpoint.json"))]
+        if ckpts:
+            return max(ckpts, key=lambda p: os.path.getmtime(p))
+
+    return path
+
+
+def _to_file_uri(path: str) -> str:
+    if not path:
+        return path
+    if path.startswith("file://"):
+        return path
+    return "file://" + os.path.abspath(path)
 
 
 # Custom logger function 
@@ -117,15 +155,12 @@ def train_model(iterations, stop_rw, env_name, scenario_name, path2tar, rwf):
 #       lambda _: ParallelPettingZooEnv(env),
 #    )
 
-    env_kwargs = dict(render_mode=None,rw_func=rwf, scenario=scenario_name) 			
-    ## Using the env defined
-    env = cerere_net_v2.env(**env_kwargs)
-    env.reset(seed=42)
+    env_kwargs = dict(render_mode=None, rw_func=rwf, scenario=scenario_name)
 
     register_env(
-       "pettingzoo_cerere",
-       lambda _: PettingZooEnv(env),
-    ) 
+        "pettingzoo_cerere",
+        lambda env_config: PettingZooEnv(cerere_net_v2.env(**env_kwargs)),
+    )
    
     # Initialize Ray if not already done
     if not ray.is_initialized():
@@ -185,7 +220,7 @@ def train_model(iterations, stop_rw, env_name, scenario_name, path2tar, rwf):
            
     # Train the model
     print(f"Starting training for {iterations} iterations ...")
-    for i in range(iterations):  
+    for i in range(iterations):
        result = model.train()
        print(f"Iter: {i}, Reward mean: {result[ENV_RUNNER_RESULTS][EPISODE_RETURN_MEAN]}")
        print(f"Iter: {i}, Reward min: {result[ENV_RUNNER_RESULTS][EPISODE_RETURN_MIN]}")
@@ -197,27 +232,25 @@ def train_model(iterations, stop_rw, env_name, scenario_name, path2tar, rwf):
            print(result)
            print("####################### Results Train End    #########################")
            # Save model
-           checkpoint_path = model.save(path2tar)
+           checkpoint_path = model.save(_to_file_uri(path2tar))
            print(f"Model saved at {checkpoint_path}")
            break
        #print(result)   
     print(f"Stop training after {i} iterations ...")
-    env.close()   
+    # Always write a checkpoint so that --eval can be run deterministically right after training
+    checkpoint_path = model.save(_to_file_uri(path2tar))
+    print(f"Model saved at {checkpoint_path}")
 ###### Train Ende 
 
 
 ###### Train with Tune Begin
 def train_model_with_tune(iterations, stop_rw, env_name, scenario_name, path2tar, rwf):
  
-    env_kwargs = dict(render_mode=None,rw_func=rwf, scenario=scenario_name) 			
-    ## Using the env defined
-    env = cerere_net_v2.env(**env_kwargs)
-    env.reset(seed=42)
-
+    env_kwargs = dict(render_mode=None, rw_func=rwf, scenario=scenario_name)
     register_env(
-       "pettingzoo_cerere",
-       lambda _: PettingZooEnv(env),
-    ) 
+        "pettingzoo_cerere",
+        lambda env_config: PettingZooEnv(cerere_net_v2.env(**env_kwargs)),
+    )
 
     # Set up logging directory
     tmp_path = "./tb_log/"
@@ -313,13 +346,10 @@ def eval_model(in_render_mode, in_scenario, path2tar, in_rwf):
 #       lambda _: ParallelPettingZooEnv(env),
 #    )
 
-    env_kwargs = dict(render_mode=in_render_mode, rw_func=in_rwf, scenario=in_scenario)    			
-    ## Using the env defined
-    env = cerere_net_v2.env(**env_kwargs)
-
+    env_kwargs = dict(render_mode=in_render_mode, rw_func=in_rwf, scenario=in_scenario)
     register_env(
-       "pettingzoo_cerere",
-       lambda _: PettingZooEnv(env),
+        "pettingzoo_cerere",
+        lambda env_config: PettingZooEnv(cerere_net_v2.env(**env_kwargs)),
     )
 
     # Initialize Ray if not already done
@@ -372,12 +402,30 @@ def eval_model(in_render_mode, in_scenario, path2tar, in_rwf):
 #    print("####################### Print Algo Beginn #########################")
 #    print(eval_algo)
 #    print("####################### Print Algo End    #########################")
-    eval_algo.restore_from_path(path2tar)
+    ckpt = _resolve_checkpoint_path(path2tar)
+    print(f"Restoring from checkpoint: {ckpt}")
+    eval_algo.restore_from_path(_to_file_uri(ckpt))
     results = eval_algo.evaluate()
     print("####################### Results Eval Beginn #########################")
     Reval = results['env_runners']['episode_return_mean']
     Leval = results['env_runners']['episode_len_mean']
-    print(f" R(eval)={Reval}, L(eval)={Leval}", end="\n")
+
+    # If the env provides config_id in info, RLlib will store it in the evaluation hist_stats
+    # We aggregate per config_id when available
+    per_cfg = {}
+    hist = results.get('env_runners', {}).get('hist_stats', {})
+    cfg_ids = hist.get('config_id', [])
+    ep_returns = hist.get('episode_return', [])
+    if cfg_ids and ep_returns and len(cfg_ids) == len(ep_returns):
+        for cid, ret in zip(cfg_ids, ep_returns):
+            per_cfg.setdefault(int(cid), []).append(float(ret))
+
+    print(f" R(eval)={Reval}, L(eval)={Leval}")
+    if per_cfg:
+        print(" Per-config returns:")
+        for cid in sorted(per_cfg):
+            vals = per_cfg[cid]
+            print(f"  C{cid+1}: n={len(vals)}, mean={sum(vals)/len(vals):.4f}")
     print("####################### Results Eval End    #########################")
     env.close()
 ###### Eval End
@@ -386,13 +434,12 @@ def eval_model(in_render_mode, in_scenario, path2tar, in_rwf):
 ###### Eval2 Begin
 def eval_model2(in_render_mode, in_scenario, path2tar, in_rwf):
 
-    env_kwargs = dict(render_mode=in_render_mode,rw_func=in_rwf, scenario=in_scenario)    			
-    ## Using the env defined
-    env = cerere_net_v2.env(**env_kwargs)
+    env_kwargs = dict(render_mode=None, rw_func=in_rwf, scenario=in_scenario)
 
+    env = cerere_net_v2.env(**env_kwargs)
     register_env(
         "pettingzoo_cerere",
-        lambda _: PettingZooEnv(env),
+        lambda env_config: PettingZooEnv(cerere_net_v2.env(**env_kwargs)),
     )
 
     # Initialize Ray if not already done
@@ -400,14 +447,17 @@ def eval_model2(in_render_mode, in_scenario, path2tar, in_rwf):
         ray.init(ignore_reinit_error=True)
 
 
-    print("Restore RLModule from checkpoint ...", end="")
+    ckpt = _resolve_checkpoint_path(path2tar)
+    print(f"Restore RLModule from checkpoint: {ckpt} ...", end="")
     rl_module = RLModule.from_checkpoint(
-        os.path.join(
-            path2tar,
-            "learner_group",
-            "learner",
-            "rl_module",
-            "p1",
+        _to_file_uri(
+            os.path.join(
+                ckpt,
+                "learner_group",
+                "learner",
+                "rl_module",
+                "p1",
+            )
         )
     )
     print(" ok")
@@ -415,13 +465,16 @@ def eval_model2(in_render_mode, in_scenario, path2tar, in_rwf):
     ham = HeuristicAttackModule()
 
     myrewards = {agent: 0 for agent in env.possible_agents}
-    n_episodes = 1
+    n_episodes = 5
     i = 0
 
+    by_cfg = {}
+
     for i in range(n_episodes):
-        i += 1
-        print("######################### Test Round %d ########################" % i)
-        env.reset(seed=42)
+        print("######################### Test Round %d ########################" % (i + 1))
+        env.reset(seed=42 + i)
+        cfg_key = getattr(env.unwrapped, "selected_config_key", None)
+        cfg_id = env.infos[env.possible_agents[0]].get("config_id") if env.infos else None
 
         for agent in env.agent_iter():
             observation, reward, termination, truncation, info = env.last()
@@ -454,9 +507,21 @@ def eval_model2(in_render_mode, in_scenario, path2tar, in_rwf):
                     print("Agent %s, Reward %f" % (str(a), env.rewards[a]))
                 print("+++++++++++ Both agents have played +++++++++++")  
 
+        # Episode finished once all agents are done
+        # Add reward by config
+        ep_avg_reward = sum(myrewards.values()) / len(myrewards.values())
+        if cfg_id is not None:
+            by_cfg.setdefault(int(cfg_id), []).append(float(ep_avg_reward))
+        print(f"Episode config: {cfg_key} (id={cfg_id}), avg_reward={ep_avg_reward}")
+
     myavg_reward = sum(myrewards.values()) / len(myrewards.values())
     print("Rewards: ", myrewards)
     print(f"Avg reward: {myavg_reward}")
+    if by_cfg:
+        print("Avg reward per config_id:")
+        for cid in sorted(by_cfg):
+            vals = by_cfg[cid]
+            print(f"  C{cid+1}: n={len(vals)}, mean={sum(vals)/len(vals):.4f}")
     env.close()
 ###### Eval2 End
 
@@ -464,8 +529,7 @@ def eval_model2(in_render_mode, in_scenario, path2tar, in_rwf):
 ###### Test Begin
 def test(in_render_mode, in_scenario):	
 
-    env_kwargs = dict(render_mode=in_render_mode,scenario=in_scenario)    			
-    ## Using the env defined
+    env_kwargs = dict(render_mode=None, scenario=in_scenario)
     env = cerere_net_v2.env(**env_kwargs)
 
     myrewards = {agent: 0 for agent in env.possible_agents}
@@ -594,7 +658,3 @@ if __name__ == "__main__":
         print("Stop train model with Tune in env %s after %s" % (ENVIRONMENT, elapsed))
     else:
         print("Do not know what to do in env %s" % ENVIRONMENT)
-
-
-
-

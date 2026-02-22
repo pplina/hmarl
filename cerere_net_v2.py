@@ -14,7 +14,8 @@ from gymnasium import spaces
 
 
 from pettingzoo import AECEnv
-from pettingzoo.utils import agent_selector, wrappers
+from pettingzoo.utils import wrappers
+from pettingzoo.utils.agent_selector import AgentSelector
 from pettingzoo.utils.conversions import parallel_wrapper_fn
 
 sys.path.append("rlearn/rlearn/")
@@ -66,7 +67,16 @@ class cerere_net_v2_env(AECEnv):
         super().__init__()
         #print("#### Beginn INIT new topology ###")
         if scenario == 'enterprise':
-            infected_nodes = ["s3_10", "s1_7", "s2_9"]
+            # Multiple fixed initial compromise patterns
+            self.infection_configs = {
+                # concentrated in one area (mostly s1/s2)
+                "C1": ["s1_7", "s1_5", "s2_9"],
+                # spread across multiple subnets (s1/s3/s4)
+                "C2": ["s1_7", "s3_10", "s4_11"],
+                # more dangerous (closer to critical server path via s3)
+                "C3": ["s3_6", "s3_7", "s3_9"],
+            }
+            self.config_keys = list(self.infection_configs.keys())
             #path2topo = "/home/ubuntu/src/rl-test/rlearn/graphs/topo_generic.csv"
             #path2pos = "/home/ubuntu/src/rl-test/rlearn/graphs/pos_generic.csv" 
             path2topo = os.getcwd() + "/rlearn/graphs/topo_generic.csv"
@@ -74,6 +84,14 @@ class cerere_net_v2_env(AECEnv):
             self.init_critserver = self.critserver = "d3_1"
             self.init_optserver = self.optserver = ["d3_2", "d4_1"]
             self.block_traffic = 0
+            # Pre-build topologies once
+            self.topologies_by_config = {
+                k: network.getTopologyFromCsv2(path2topo, infected)
+                for k, infected in self.infection_configs.items()
+            }
+            # Default (will be overwritten on first reset)
+            self.selected_config_key = self.config_keys[0]
+            self.topology = self.topologies_by_config[self.selected_config_key]
         if scenario == 'military':
             #infected_nodes = ["ac-m-2-5"]
             infected_nodes = ["ac-m-2-4"]
@@ -90,7 +108,8 @@ class cerere_net_v2_env(AECEnv):
         # 1 = All attacker infect all nodes in neighbourhood
         # 2 = One attacker infects one node in the neighbourhood
         self.attackmode = 0
-        self.topology = network.getTopologyFromCsv2(path2topo, infected_nodes)
+        if scenario != 'enterprise':
+            self.topology = network.getTopologyFromCsv2(path2topo, infected_nodes)
         #print(self.topology)
         self.pos = network.getPosFromCsv(path2pos)
         self.nwstate = network.getStateFromTopology(self.topology)
@@ -275,6 +294,16 @@ class cerere_net_v2_env(AECEnv):
         self.critserver = self.init_critserver
         self.optserver = self.init_optserver
         self.block_traffic = 0
+
+        # Sample one of the patterns on reset (only for enterprise yet)
+        if hasattr(self, "topologies_by_config"):
+            if seed is not None:
+                random.seed(seed)
+            self.selected_config_key = random.choice(self.config_keys)
+            self.topology = self.topologies_by_config[self.selected_config_key]
+
+        self.netgraph = nx.Graph()
+        self.netgraph = network.createNetwork(self.net, self.netgraph, self.topology, self.mode)
         self.nwstate, self.netgraph = network.resetNetwork(self.topology, self.net, self.netgraph, self.mode) # Reset Network
         self._init()
         ##### not needed # observation = self.observe()
@@ -285,13 +314,20 @@ class cerere_net_v2_env(AECEnv):
         self._cumulative_rewards = {agent: 0 for agent in self.agents}
         self.terminations = {agent: False for agent in self.agents}
         self.truncations = {agent: False for agent in self.agents}
-        self.infos = {agent: {} for agent in self.agents}
+
+        cfg_info = {}
+        if hasattr(self, "selected_config_key"):
+            cfg_info = {
+                "config_key": self.selected_config_key,
+                "config_id": self.config_keys.index(self.selected_config_key),
+            }
+        self.infos = {agent: dict(cfg_info) for agent in self.agents}
         self.state = {agent: None for agent in self.agents}
         #self.observations = {agent: NONE for agent in self.agents}
         self.observations = {agent: np.array(self.flatState, dtype=np.float32)  for agent in self.agents}
         self.num_moves = 0
-        # Our agent_selector utility allows easy cyclic stepping through the agents list.
-        self._agent_selector = agent_selector(self.agents)
+
+        self._agent_selector = AgentSelector(self.agents)
         self.agent_selection = self._agent_selector.next()
 
         if self.render_mode == "human":
@@ -369,6 +405,3 @@ class cerere_net_v2_env(AECEnv):
         #print("#### End STEP in pettingzoo ###")
         #print(self.nwstate)
         #print("Rewards = {} Accumulate_rewards = {}".format(self.rewards, self._cumulative_rewards))
-
-
-
