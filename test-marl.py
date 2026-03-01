@@ -123,14 +123,6 @@ def _resolve_checkpoint_path(path: str) -> str:
 
     return path
 
-
-def _to_file_uri(path: str) -> str:
-    if not path:
-        return path
-    if path.startswith("file://"):
-        return path
-    return "file://" + os.path.abspath(path)
-
 class HeuristicAttackModule(RLModule):
     @override(RLModule)
     def _forward(self, batch, **kwargs):
@@ -262,13 +254,13 @@ def train_model(iterations, stop_rw, env_name, scenario_name, path2tar, rwf):
            print(result)
            print("####################### Results Train End    #########################")
            # Save model
-           checkpoint_path = model.save(_to_file_uri(path2tar))
+           checkpoint_path = model.save(os.path.abspath(path2tar))
            print(f"Model saved at {checkpoint_path}")
            break
        #print(result)   
     print(f"Stop training after {i} iterations ...")
     # Always write a checkpoint so that --eval can be run deterministically right after training
-    checkpoint_path = model.save(_to_file_uri(path2tar))
+    checkpoint_path = model.save(os.path.abspath(path2tar))
     print(f"Model saved at {checkpoint_path}")
 ###### Train Ende 
 
@@ -352,7 +344,7 @@ def train_hmarl(iterations, stop_rw, scenario_name, path2tar, rwf):
             print(f"Reached episode return of {stop_rw} -> stopping")
             break
 
-    checkpoint_path = algo.save(_to_file_uri(path2tar))
+    checkpoint_path = algo.save(os.path.abspath(path2tar))
     print(f"HMARL model saved at {checkpoint_path}")
 
 
@@ -424,7 +416,7 @@ def eval_hmarl(in_scenario, path2tar, in_rwf, n_episodes: int = 10, base_seed: i
     algo = eval_config.build_algo()
     ckpt = _resolve_checkpoint_path(path2tar)
     print(f"Restoring HMARL algo from checkpoint: {ckpt}")
-    algo.restore_from_path(_to_file_uri(ckpt))
+    algo.restore_from_path(os.path.abspath(ckpt))
     results = algo.evaluate()
     mean_ret = results.get("env_runners", {}).get("episode_return_mean")
     print(f"HMARL eval: episode_return_mean={mean_ret}")
@@ -592,7 +584,7 @@ def eval_model(in_render_mode, in_scenario, path2tar, in_rwf):
 #    print("####################### Print Algo End    #########################")
     ckpt = _resolve_checkpoint_path(path2tar)
     print(f"Restoring from checkpoint: {ckpt}")
-    eval_algo.restore_from_path(_to_file_uri(ckpt))
+    eval_algo.restore_from_path(os.path.abspath(ckpt))
     results = eval_algo.evaluate()
     print("####################### Results Eval Beginn #########################")
     Reval = results['env_runners']['episode_return_mean']
@@ -646,12 +638,12 @@ def eval_model2(
     ckpt = _resolve_checkpoint_path(path2tar)
     print(f"Restore RLModule from checkpoint: {ckpt} ...", end="")
     rl_module = RLModule.from_checkpoint(
-        _to_file_uri(
+        os.path.abspath(
             os.path.join(
                 ckpt,
                 "learner_group",
                 "learner",
-                "rl_module",
+                "rl_module",                
                 "p1",
             )
         )
@@ -752,7 +744,7 @@ def eval_model2_forced_configs(
 
     ckpt = _resolve_checkpoint_path(path2tar)
     rl_module = RLModule.from_checkpoint(
-        _to_file_uri(
+        os.path.abspath(
             os.path.join(
                 ckpt,
                 "learner_group",
@@ -879,7 +871,7 @@ def eval_hmarl_forced_configs(
 
     algo = eval_config.build_algo()
     ckpt = _resolve_checkpoint_path(path2tar)
-    algo.restore_from_path(_to_file_uri(ckpt))
+    algo.restore_from_path(os.path.abspath(ckpt))
 
     out = {}
     for cfg in configs:
@@ -916,7 +908,7 @@ def eval_hmarl_manual_forced_configs(
     # Load all policies
     def _load_module(policy_id: str) -> RLModule:
         return RLModule.from_checkpoint(
-            _to_file_uri(
+            os.path.abspath(
                 os.path.join(
                     ckpt,
                     "learner_group",
@@ -1150,6 +1142,18 @@ if __name__ == "__main__":
                         help='Number of evaluation episodes (enterprise uses multi-config reset). Default=60')
     parser.add_argument('--eval_seed', type=int, default=42,
                         help='Base seed for evaluation episode resets. Default=42')
+    parser.add_argument('--eval_table', help='Prints a per-config (C1/C2/C3) table', action='store_true')
+    parser.add_argument(
+        '--eval_configs',
+        type=str,
+        default='C1,C2,C3',
+        help='Comma-separated list of enterprise configs to evaluate when --eval_table is set. Default=C1,C2,C3'
+    )
+    parser.add_argument(
+        '--eval_deterministic',
+        help='If set, choose argmax actions during manual per-config evaluation (no sampling).',
+        action='store_true'
+    )
     parser.add_argument('--path2tar', type=str, default=os.getcwd() + 'targetmodel_ai_gym.pt',
                         help='Path to the neural network')
     parser.add_argument('--scen', type=str, default='none',
@@ -1215,7 +1219,30 @@ if __name__ == "__main__":
     elif args.eval_hmarl:
         print("Eval HMARL PPO in scenario %s" % SCENARIO)
         start = datetime.datetime.now().replace(microsecond=0)
+
         eval_hmarl(SCENARIO, args.path2tar, args.rwf, n_episodes=args.eval_episodes, base_seed=args.eval_seed)
+
+        if args.eval_table:
+            if SCENARIO != "enterprise":
+                print("--eval_table is intended for enterprise only (C1/C2/C3).")
+            else:
+                cfgs = [c.strip() for c in args.eval_configs.split(',') if c.strip()]
+                print("\nHMARL evaluation (forced configs)")
+                hm = eval_hmarl_manual_forced_configs(
+                    in_scenario=SCENARIO,
+                    path2tar=args.path2tar,
+                    in_rwf=args.rwf,
+                    configs=cfgs,
+                    n_episodes_per_cfg=args.eval_episodes,
+                    base_seed=args.eval_seed,
+                    deterministic=bool(args.eval_deterministic),
+                )
+                print("cfg\tn\tmean_return\tsuccess_rate")
+                for cfg in cfgs:
+                    d = hm.get(cfg, {})
+                    print(
+                        f"{cfg}\t{d.get('n')}\t{d.get('mean_return', float('nan')):.4f}\t\t{d.get('success_rate', float('nan')):.3f}"
+                    )
         end = datetime.datetime.now().replace(microsecond=0)
         elapsed = end - start
         print("Stop eval HMARL PPO after %s" % elapsed)

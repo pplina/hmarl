@@ -99,7 +99,5 @@ python3 test-marl.py --eval --rwf 1  --stop_rw 0.83 --iter 100000 --scen militar
 ```
 python3 test-marl.py --train_hmarl --scen enterprise --rwf 1 --iter 10000 --stop_rw 999 --path2tar ./exp_hmarl_ppo
 
-python3 test-marl.py --eval_hmarl --scen enterprise --rwf 1 --eval_episodes 100 --eval_seed 100 --path2tar ./exp_hmarl_ppo
+python3 test-marl.py --eval_hmarl --eval_table --eval_deterministic --scen enterprise --rwf 10 --eval_episodes 100 --eval_seed 100 --path2tar ./exp_hmarl_ppo_10k
 ```
-
-
