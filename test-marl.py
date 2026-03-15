@@ -266,9 +266,21 @@ def train_model(iterations, stop_rw, env_name, scenario_name, path2tar, rwf):
 
 
 ###### Train HMARL Begin
-def train_hmarl(iterations, stop_rw, scenario_name, path2tar, rwf):
+def train_hmarl(
+    iterations,
+    stop_rw,
+    scenario_name,
+    path2tar,
+    rwf,
+    enterprise_config_set: str | None = None,
+):
 
-    env_kwargs = dict(render_mode=None, rw_func=rwf, scenario=scenario_name)
+    env_kwargs = dict(
+        render_mode=None,
+        rw_func=rwf,
+        scenario=scenario_name,
+        enterprise_config_set=enterprise_config_set,
+    )
     register_env(
         "pettingzoo_cerere_hmarl",
         lambda env_config: PettingZooEnv(cerere_net_v2.hmarl_env(**env_kwargs)),
@@ -349,9 +361,21 @@ def train_hmarl(iterations, stop_rw, scenario_name, path2tar, rwf):
 
 
 ###### Eval HMARL Begin
-def eval_hmarl(in_scenario, path2tar, in_rwf, n_episodes: int = 10, base_seed: int = 42):
+def eval_hmarl(
+    in_scenario,
+    path2tar,
+    in_rwf,
+    n_episodes: int = 10,
+    base_seed: int = 42,
+    enterprise_config_set: str | None = None,
+):
     """Evaluate a HMARL checkpoint by running RLlib's evaluate() API."""
-    env_kwargs = dict(render_mode=None, rw_func=in_rwf, scenario=in_scenario)
+    env_kwargs = dict(
+        render_mode=None,
+        rw_func=in_rwf,
+        scenario=in_scenario,
+        enterprise_config_set=enterprise_config_set,
+    )
     register_env(
         "pettingzoo_cerere_hmarl",
         lambda env_config: PettingZooEnv(cerere_net_v2.hmarl_env(**env_kwargs)),
@@ -900,9 +924,15 @@ def eval_hmarl_manual_forced_configs(
     n_episodes_per_cfg: int = 20,
     base_seed: int = 42,
     deterministic: bool = True,
+    enterprise_config_set: str | None = None,
 ):
 
-    env = cerere_net_v2.hmarl_env(render_mode=None, rw_func=in_rwf, scenario=in_scenario)
+    env = cerere_net_v2.hmarl_env(
+        render_mode=None,
+        rw_func=in_rwf,
+        scenario=in_scenario,
+        enterprise_config_set=enterprise_config_set,
+    )
     ckpt = _resolve_checkpoint_path(path2tar)
 
     # Load all policies
@@ -1150,6 +1180,18 @@ if __name__ == "__main__":
         help='Comma-separated list of enterprise configs to evaluate when --eval_table is set. Default=C1,C2,C3'
     )
     parser.add_argument(
+        '--hmarl_config_set',
+        '--eval_config_set',
+        dest='hmarl_config_set',
+        type=str,
+        default='config_sets/enterprise/default.json',
+        help=(
+            'Path to an enterprise config-set JSON file (C1/C2/C3 definitions). '
+            'Used by HMARL evaluation table and HMARL RLlib evaluate() run. '
+            'Alias: --eval_config_set. Default=config_sets/enterprise/default.json'
+        ),
+    )
+    parser.add_argument(
         '--eval_deterministic',
         help='If set, choose argmax actions during manual per-config evaluation (no sampling).',
         action='store_true'
@@ -1211,7 +1253,14 @@ if __name__ == "__main__":
     elif args.train_hmarl:
         print("Train HMARL PPO in scenario %s" % SCENARIO)
         start = datetime.datetime.now().replace(microsecond=0)
-        train_hmarl(args.iter, args.stop_rw, SCENARIO, args.path2tar, args.rwf)
+        train_hmarl(
+            args.iter,
+            args.stop_rw,
+            SCENARIO,
+            args.path2tar,
+            args.rwf,
+            enterprise_config_set=(args.hmarl_config_set if SCENARIO == "enterprise" else None),
+        )
         end = datetime.datetime.now().replace(microsecond=0)
         elapsed = end - start
         print("Stop train HMARL PPO after %s" % elapsed)
@@ -1220,7 +1269,14 @@ if __name__ == "__main__":
         print("Eval HMARL PPO in scenario %s" % SCENARIO)
         start = datetime.datetime.now().replace(microsecond=0)
 
-        eval_hmarl(SCENARIO, args.path2tar, args.rwf, n_episodes=args.eval_episodes, base_seed=args.eval_seed)
+        eval_hmarl(
+            SCENARIO,
+            args.path2tar,
+            args.rwf,
+            n_episodes=args.eval_episodes,
+            base_seed=args.eval_seed,
+            enterprise_config_set=(args.hmarl_config_set if SCENARIO == "enterprise" else None),
+        )
 
         if args.eval_table:
             if SCENARIO != "enterprise":
@@ -1236,6 +1292,7 @@ if __name__ == "__main__":
                     n_episodes_per_cfg=args.eval_episodes,
                     base_seed=args.eval_seed,
                     deterministic=bool(args.eval_deterministic),
+                    enterprise_config_set=args.hmarl_config_set,
                 )
                 print("cfg\tn\tmean_return\tsuccess_rate")
                 for cfg in cfgs:

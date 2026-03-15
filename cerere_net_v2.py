@@ -5,6 +5,7 @@ import networkx as nx
 import matplotlib.pyplot as plt
 import os
 import sys
+import json
 
 import functools
 import time
@@ -60,6 +61,33 @@ def _make_base_env(render_mode: str | None, rw_func: int | None, scenario: str |
     return cerere_net_v2_env(render_mode=render_mode, rw_func=rw_func, scenario=scenario)
 
 
+# Load enterprise infection configs from JSON.
+def _load_enterprise_config_set(path: str | None) -> dict[str, list[str]]:
+    if not path:
+        return {}
+    p = os.path.abspath(path)
+    with open(p, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    # Format A
+    if isinstance(data, dict) and "configs" in data and isinstance(data["configs"], dict):
+        out: dict[str, list[str]] = {}
+        for k, v in data["configs"].items():
+            if isinstance(v, dict) and "infected_nodes" in v:
+                out[str(k)] = list(v["infected_nodes"])
+        return out
+
+    # Format B
+    if isinstance(data, dict):
+        out2: dict[str, list[str]] = {}
+        for k, v in data.items():
+            if isinstance(v, list) and all(isinstance(x, str) for x in v):
+                out2[str(k)] = list(v)
+        return out2
+
+    raise ValueError(f"Unsupported enterprise config-set format in {p}")
+
+
 # HMARL wiring layer around the existing CERERE environment
 class cerere_hmarl_env(AECEnv):
 
@@ -74,12 +102,18 @@ class cerere_hmarl_env(AECEnv):
         render_mode: str | None = None,
         rw_func: int | None = 1,
         scenario: str | None = "military",
+        enterprise_config_set: str | None = None,
         num_skills: int = 4,
     ):
         super().__init__()
         self.render_mode = render_mode
 
-        self.base_env = _make_base_env(render_mode=None, rw_func=rw_func, scenario=scenario)
+        self.base_env = cerere_net_v2_env(
+            render_mode=None,
+            rw_func=rw_func,
+            scenario=scenario,
+            enterprise_config_set=enterprise_config_set,
+        )
 
         # HMARL agents
         self.manager_id = "manager"
@@ -338,7 +372,13 @@ class cerere_net_v2_env(AECEnv):
     }
 
 
-    def __init__(self, render_mode: str | None = None, rw_func: int | None = 1, scenario: str | None = 'military'):
+    def __init__(
+        self,
+        render_mode: str | None = None,
+        rw_func: int | None = 1,
+        scenario: str | None = 'military',
+        enterprise_config_set: str | None = None,
+    ):
         """
         The init method takes in environment arguments and
          should define the following attributes:
@@ -348,16 +388,23 @@ class cerere_net_v2_env(AECEnv):
         super().__init__()
         #print("#### Beginn INIT new topology ###")
         if scenario == 'enterprise':
-            # Multiple fixed initial compromise patterns
-            self.infection_configs = {
-                "C1": ["s3_10", "s1_7", "s2_9"],
-                # concentrated in one area (mostly s1/s2)
-                #"C1": ["s1_7", "s1_5", "s2_9"], 
-                # spread across multiple subnets (s1/s3/s4)
-                "C2": ["s1_7", "s3_10", "s4_11"],
-                # more dangerous (closer to critical server path via s3)
-                "C3": ["s3_6", "s3_7", "s3_9"],
-            }
+            # Multiple fixed initial compromise patterns (loaded from file when provided)
+            loaded = _load_enterprise_config_set(enterprise_config_set)
+            if loaded:
+                self.infection_configs = loaded
+                self.enterprise_config_set_path = os.path.abspath(enterprise_config_set)
+            else:
+                # Fallback to the default patterns (kept for backwards compatibility)
+                self.infection_configs = {
+                    "C1": ["s3_10", "s1_7", "s2_9"],
+                    # concentrated in one area (mostly s1/s2)
+                    #"C1": ["s1_7", "s1_5", "s2_9"], 
+                    # spread across multiple subnets (s1/s3/s4)
+                    "C2": ["s1_7", "s3_10", "s4_11"],
+                    # more dangerous (closer to critical server path via s3)
+                    "C3": ["s3_6", "s3_7", "s3_9"],
+                }
+                self.enterprise_config_set_path = None
             self.config_keys = list(self.infection_configs.keys())
             #path2topo = "/home/ubuntu/src/rl-test/rlearn/graphs/topo_generic.csv"
             #path2pos = "/home/ubuntu/src/rl-test/rlearn/graphs/pos_generic.csv" 
@@ -623,6 +670,8 @@ class cerere_net_v2_env(AECEnv):
                 "config_key": self.selected_config_key,
                 "config_id": self.config_keys.index(self.selected_config_key),
             }
+            if getattr(self, "enterprise_config_set_path", None):
+                cfg_info["config_set"] = self.enterprise_config_set_path
         self.infos = {agent: dict(cfg_info) for agent in self.agents}
         self.state = {agent: None for agent in self.agents}
         #self.observations = {agent: NONE for agent in self.agents}
@@ -650,7 +699,7 @@ class cerere_net_v2_env(AECEnv):
         ###print("AGENT %s TRY do %d" % (str(self.agent_selection), action))
 
         if self._agent_selector.is_first():
-            print("AGENT %s do %d" % (str(self.agent_selection), action))
+            #print("AGENT %s do %d" % (str(self.agent_selection), action))
             self.actualAction = action
             self.actualActionType = ATTACK_ACTION
             self.nwstate = attacker.attack(self.net, self.netgraph, self.nwstate, self.critserver, action, self.mode, self.attackmode)
@@ -661,7 +710,7 @@ class cerere_net_v2_env(AECEnv):
                 self.observations[i] =np.array(self.flatState, dtype=np.float32)
 
         if self._agent_selector.is_last():
-            print("AGENT %s do %d" % (str(self.agent_selection), action))
+            #print("AGENT %s do %d" % (str(self.agent_selection), action))
             #print(self.nwstate)
             self.mystep = self.mystep + 1
             self.actualAction = action

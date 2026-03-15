@@ -1,0 +1,18 @@
+{
+  "name": "alt_spread",
+  "description": "Alternative enterprise compromise patterns (new C1/C2/C3) designed to differ from the default set.",
+  "configs": {
+    "C1": {
+      "description": "Concentrated in s4 (different subnet than default C1).",
+      "infected_nodes": ["s4_7", "s4_9", "s4_11"]
+    },
+    "C2": {
+      "description": "Spread across s2/s3/s4 (different spread than default C2).",
+      "infected_nodes": ["s2_10", "s3_5", "s4_3"]
+    },
+    "C3": {
+      "description": "Dangerous: directly on the critical-server neighborhood (s3_8 is directly connected to d3_1).",
+      "infected_nodes": ["s3_8", "s3_5", "s3_3"]
+    }
+  }
+}

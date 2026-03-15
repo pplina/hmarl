@@ -9,7 +9,7 @@ import random
 def attack(net, netgraph, nwstate, critserver, action, mode, attmode):
 		
     if (action != 1):
-        print("Unknown action")
+        #print("Unknown action")
         return nwstate
 
     # Collect all infected Nodes

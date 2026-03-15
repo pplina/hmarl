@@ -1,0 +1,18 @@
+{
+  "name": "default",
+  "description": "Original enterprise compromise patterns (C1/C2/C3) that were previously hardcoded in cerere_net_v2_env.",
+  "configs": {
+    "C1": {
+      "description": "Compromises concentrated in s1/s2 subnet.",
+      "infected_nodes": ["s1_7", "s1_5", "s2_9"]
+    },
+    "C2": {
+      "description": "Compromises spread across multiple subnets.",
+      "infected_nodes": ["s1_7", "s3_10", "s4_11"]
+    },
+    "C3": {
+      "description": "More dangerous start in s3 (closer to critical server path).",
+      "infected_nodes": ["s3_6", "s3_7", "s3_9"]
+    }
+  }
+}
