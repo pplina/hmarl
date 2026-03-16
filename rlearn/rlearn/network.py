@@ -79,31 +79,37 @@ def getVectorFromState(nwstate):
 
 def getVectorFromState2(nwstate, critserver, netgraph):
     flatState = []
-    #print(nwstate)
+
+    # Compute reachability and distances once
+    try:
+        reachable = nx.node_connected_component(netgraph, critserver)
+    except Exception:
+        reachable = {critserver}
+    try:
+        dist_from_crit = nx.single_source_shortest_path_length(netgraph, critserver)
+    except Exception:
+        dist_from_crit = {critserver: 0}
+
     for value in nwstate:
         flatState.append(value[0])
-        #if (len(value) == 2): 
-        #    print("Node %s state %s (%d)" % (value[1], value[0],len(value))) 
-        #if (len(value) == 3): 
-        #    print("Node %s link %s (%d)" % (value[1], value[0],len(value))) 
-        if len(value) == 2:  
-            if value[1] == critserver:
-                #flatState.append(1)
-                #print("Critserver %s to critserver conn state 1 (%d)" % (value[1], len(value)))
-                flatState.append(0)
-                #print("Critserver %s to critserver conn state 0 (%d)" % (value[1], len(value)))
-            else:
-                if len(reachable_node_list2(critserver, value[1], netgraph)) == 0:
-                    #flatState.append(0)
-                    #print("Node %s to critserver conn state 0 (%d)" % (value[1],len(value)))
-                    flatState.append(1)
-                    #print("Node %s to critserver conn state 1 (%d)" % (value[1],len(value))
-                else: 
-                    #flatState.append(1)
-                    #print("Node %s to critserver conn state 1 (%d)" % (value[1], len(value)))
-                    shortestpath = nx.shortest_path_length(netgraph, value[1], critserver)
-                    #print("Node %s to critserver conn state %s (%d)" % (value[1], str(shortestpath/8) ,len(value)))
-                    flatState.append(shortestpath/8)
+        if len(value) != 2:
+            continue
+
+        node = value[1]
+        if node == critserver:
+            flatState.append(0)
+            continue
+
+        if node not in reachable:
+            flatState.append(1)
+            continue
+
+        d = dist_from_crit.get(node)
+        if d is None:
+            flatState.append(1)
+        else:
+            flatState.append(d / 8)
+
     return flatState
 
 
@@ -191,13 +197,12 @@ def getNodeStatistic(critserver, optserver, topology, nwstate, netgraph, in_bloc
     healthyNodes = len([node for node in nwstate if [0, node[1]] in nwstate and len(node) == 2])
     infectedNodes = len(topology) - healthyNodes
 
-    # Get Subgraph of all nodes connected to the critical Server
-    reachable = [
-        c
-        for c in sorted(nx.connected_components(netgraph), key=len, reverse=True)
-        if critserver in c
-    ]
-    #print(reachable[0])
+    # Get component of all nodes connected to the critical Server (faster than
+    # computing all connected components + sorting)
+    try:
+        reachable = nx.node_connected_component(netgraph, critserver)
+    except Exception:
+        reachable = {critserver}
     
     # Calculate amount of healthy nodes with no infection on path
     #p = nx.shortest_path(netgraph, critserver, 'tr_m_1_5')
@@ -218,7 +223,7 @@ def getNodeStatistic(critserver, optserver, topology, nwstate, netgraph, in_bloc
         all_reachable_nodes += 1  
                 
     # Calculate amount of infected healthy nodes connected to the critical server
-    for node in reachable[0]:
+    for node in reachable:
         if [1, node] in nwstate:
             #print("Reachable infected %s" % node)
             reachable_infected_nodes += 1
@@ -255,20 +260,18 @@ def getReward2(critserver, optserver, topology, nwstate, pFlag, netgraph, in_act
         return reward, terminate, reachable_healthy_nodes, reachable_infected_nodes, data_ex
 
 
-    # Get Subgraph of all nodes connected to the critical Server
-    reachable = [
-        c
-        for c in sorted(nx.connected_components(netgraph), key=len, reverse=True)
-        if critserver in c
-    ]
-    #print(reachable[0])  
+    # Component of nodes connected to critical server
+    try:
+        reachable = nx.node_connected_component(netgraph, critserver)
+    except Exception:
+        reachable = {critserver}
     
     all_reachable_nodes, reachable_healthy_nodes, reachable_infected_nodes, healthy_nodes_no_infected_subg, data_ex_tmp = getNodeStatistic(critserver, optserver, topology, nwstate, netgraph, in_block_traffic)
     #print("Num Nodes %d, Reachable nodes: All = %d, Healthy = %d, Infected = %d, Healthy (no infection on path) = %d, Data Ex %d" % (len(topology), all_reachable_nodes, reachable_healthy_nodes, reachable_infected_nodes, healthy_nodes_no_infected_subg, data_ex))
     #print(nwstate)
 	
     # Check wether subgraph is in size smaller as 0.25 of the original Topology, return reward = -1 and terminated = 1
-    if len(reachable[0]) - reachable_infected_nodes < 0.25 * len(topology):
+    if len(reachable) - reachable_infected_nodes < 0.25 * len(topology):
         reward = -1
         terminate = 1
         ##print("Terminate (small leftover topology), Reward = %f" % reward)
@@ -335,20 +338,18 @@ def getReward3(critserver, optserver, topology, nwstate, pFlag, netgraph, in_act
         return reward, terminate, reachable_healthy_nodes, reachable_infected_nodes, data_ex
 
 
-    # Get Subgraph of all nodes connected to the critical Server
-    reachable = [
-        c
-        for c in sorted(nx.connected_components(netgraph), key=len, reverse=True)
-        if critserver in c
-    ]
-    #print(reachable[0])  
+    # Component of nodes connected to critical server
+    try:
+        reachable = nx.node_connected_component(netgraph, critserver)
+    except Exception:
+        reachable = {critserver}
     
     all_reachable_nodes, reachable_healthy_nodes, reachable_infected_nodes, healthy_nodes_no_infected_subg, data_ex_tmp = getNodeStatistic(critserver, optserver, topology, nwstate, netgraph, in_block_traffic)
     #print("Num Nodes %d, Reachable nodes: All = %d, Healthy = %d, Infected = %d, Healthy (no infection on path) = %d, Data Ex %d" % (len(topology), all_reachable_nodes, reachable_healthy_nodes, reachable_infected_nodes, healthy_nodes_no_infected_subg, data_ex))
     #print(nwstate)
 	
     # Check wether subgraph is in size smaller as 0.25 of the original Topology, return reward = -1 and terminated = 1
-    if len(reachable[0]) - reachable_infected_nodes < 0.25 * len(topology):
+    if len(reachable) - reachable_infected_nodes < 0.25 * len(topology):
         reward = -1
         terminate = 1
         _vprint("Terminate (small leftover topology), Reward = %f" % reward)
