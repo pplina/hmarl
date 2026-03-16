@@ -622,7 +622,8 @@ def eval_model2(
     verbose: bool = False,
 ):
 
-    env_kwargs = dict(render_mode=None, rw_func=in_rwf, scenario=in_scenario)
+    env_kwargs = dict(render_mode=in_render_mode, rw_func=in_rwf, scenario=in_scenario)
+    #env_kwargs = dict(render_mode=None, rw_func=in_rwf, scenario=in_scenario)
 
     env = cerere_net_v2.env(**env_kwargs)
     register_env(
@@ -653,7 +654,7 @@ def eval_model2(
     ham = HeuristicAttackModule()
 
     myrewards = {agent: 0 for agent in env.possible_agents}
-    n_episodes = 5
+    n_episodes = 1
     i = 0
 
     by_cfg = {}
@@ -661,7 +662,8 @@ def eval_model2(
     by_cfg_success: dict[int, list[int]] = {}
 
     for i in range(n_episodes):
-        env.reset(seed=base_seed + i)
+        env.reset(seed=base_seed , options={"config_key": "C1"})
+        #env.reset(seed=base_seed + i)
         cfg_key = getattr(env.unwrapped, "selected_config_key", None)
         cfg_id = env.infos[env.possible_agents[0]].get("config_id") if env.infos else None
 
@@ -702,10 +704,8 @@ def eval_model2(
         # Consider player_1 as the defender policy
         ep_ret_def = float(ep_returns.get("player_1", 0.0))
 
-        if verbose:
-            print(
-                f"Episode {i+1:03d}: cfg={cfg_key} (id={cfg_id}) return={ep_ret_def:.4f} success={success}"
-            )
+        #if verbose:
+        print(f"Episode {i+1:03d}: cfg={cfg_key} (id={cfg_id}) return={ep_ret_def:.4f} success={success}")
 
         if cfg_id is not None:
             cid = int(cfg_id)
@@ -1138,7 +1138,7 @@ if __name__ == "__main__":
                         help='Mean reward to stop the training (ent=0.64 ent/ mil=0.83 mil), default = 0.1')
     parser.add_argument('--rwf', type=int, default=1,
                         help='Used reward function (iso-patch=1/bt=2) , default = 1')   
-    parser.add_argument('--eval_episodes', type=int, default=60,
+    parser.add_argument('--eval_episodes', type=int, default=1,
                         help='Number of evaluation episodes (enterprise uses multi-config reset). Default=60')
     parser.add_argument('--eval_seed', type=int, default=42,
                         help='Base seed for evaluation episode resets. Default=42')

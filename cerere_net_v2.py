@@ -350,8 +350,9 @@ class cerere_net_v2_env(AECEnv):
         if scenario == 'enterprise':
             # Multiple fixed initial compromise patterns
             self.infection_configs = {
+                "C1": ["s3_10", "s1_7", "s2_9"],
                 # concentrated in one area (mostly s1/s2)
-                "C1": ["s1_7", "s1_5", "s2_9"],
+                #"C1": ["s1_7", "s1_5", "s2_9"], 
                 # spread across multiple subnets (s1/s3/s4)
                 "C2": ["s1_7", "s3_10", "s4_11"],
                 # more dangerous (closer to critical server path via s3)
@@ -372,15 +373,28 @@ class cerere_net_v2_env(AECEnv):
             }
             # Default (will be overwritten on first reset)
             self.selected_config_key = self.config_keys[0]
+            #print(self.selected_config_key)
             self.topology = self.topologies_by_config[self.selected_config_key]
         if scenario == 'military':
-            #infected_nodes = ["ac-m-2-5"]
-            infected_nodes = ["ac-m-2-4"]
+            #infected_nodes = ["ac-m-2-4"]
+            self.infection_configs = {
+                "C1": ["ac-m-2-4"],
+            }
+            self.config_keys = list(self.infection_configs.keys())
             path2topo = os.getcwd() + "/rlearn/graphs/topo_cerere_multi.csv"
             path2pos = os.getcwd() + "/rlearn/graphs/pos_cerere.csv"
             self.init_critserver = self.critserver = "as-hq"
             self.init_optserver = self.optserver = ["as-hqa", "as-hqa2"] # ["ash_hqa"]  # what is ash_hqa?
             self.block_traffic = 0
+# Pre-build topologies once
+            self.topologies_by_config = {
+                k: network.getTopologyFromCsv2(path2topo, infected)
+                for k, infected in self.infection_configs.items()
+            }
+# Default (will be overwritten on first reset)
+            self.selected_config_key = self.config_keys[0]
+            #print(self.selected_config_key)
+            self.topology = self.topologies_by_config[self.selected_config_key]
 
         self.net = None  # mininet is not used
         self.mode = "none"  # net type wifi,lan and none in case of no mininet
@@ -389,8 +403,8 @@ class cerere_net_v2_env(AECEnv):
         # 1 = All attacker infect all nodes in neighbourhood
         # 2 = One attacker infects one node in the neighbourhood
         self.attackmode = 0
-        if scenario != 'enterprise':
-            self.topology = network.getTopologyFromCsv2(path2topo, infected_nodes)
+        ##########if scenario != 'enterprise':
+        ##########    self.topology = network.getTopologyFromCsv2(path2topo, infected_nodes)
         #print(self.topology)
         self.pos = network.getPosFromCsv(path2pos)
         self.nwstate = network.getStateFromTopology(self.topology)
@@ -544,13 +558,11 @@ class cerere_net_v2_env(AECEnv):
 
     def _init(self):
         # Attack once in Order to achieve Initial Configuration of the Paper used
-        ####-----self.nwstate = attacker.attack(self.net, self.netgraph, self.nwstate, self.critserver, self.mode, self.attackmode)
+        ###---self.nwstate = attacker.attack(self.net, self.netgraph, self.nwstate, self.critserver, 1, self.mode, self.attackmode)
         self.flatState = network.getVectorFromState2(self.nwstate, self.critserver, self.netgraph)
         all_reachable_nodes, reachable_healthy_nodes, reachable_infected_nodes, healthy_nodes_no_infected_subg, self.data_ex = network.getNodeStatistic(self.critserver, self.optserver, self.topology, self.nwstate, self.netgraph, self.block_traffic)
         # print(self.state)
-        ##### replace # self.observation_state = np.array(self.flatState, dtype=np.float32)
-        
-        # print(self.observation_state)
+   
         self.actualActionType = NOTYPE_ACTION
         self.actualAction = -1
 
@@ -592,7 +604,6 @@ class cerere_net_v2_env(AECEnv):
                     random.seed(seed)
                 self.selected_config_key = random.choice(self.config_keys)
             self.topology = self.topologies_by_config[self.selected_config_key]
-
         self.netgraph = nx.Graph()
         self.netgraph = network.createNetwork(self.net, self.netgraph, self.topology, self.mode)
         self.nwstate, self.netgraph = network.resetNetwork(self.topology, self.net, self.netgraph, self.mode) # Reset Network
@@ -636,12 +647,11 @@ class cerere_net_v2_env(AECEnv):
 
         self.state[self.agent_selection] = action
         self._cumulative_rewards[self.agent_selection] = 0
-        #print("AGENT %s TRY do %d" % (str(self.agent_selection), action))
+        ###print("AGENT %s TRY do %d" % (str(self.agent_selection), action))
 
         if self._agent_selector.is_first():
             print("AGENT %s do %d" % (str(self.agent_selection), action))
             self.actualAction = action
-            self.actualAction = -2
             self.actualActionType = ATTACK_ACTION
             self.nwstate = attacker.attack(self.net, self.netgraph, self.nwstate, self.critserver, action, self.mode, self.attackmode)
             self.flatState = network.getVectorFromState2(self.nwstate, self.critserver, self.netgraph)
@@ -658,20 +668,20 @@ class cerere_net_v2_env(AECEnv):
             self.actualActionType = DEFENSE_ACTION
             self.nwstate, self.netgraph, pFlag, self.critserver, self.optserver, self.block_traffic = defender.getAction(self.net, self.netgraph,self.critserver, self.optserver, action, self.actionSpace, self.topology, self.nwstate, self.block_traffic)
         
-            ####---if self.render_mode == "human":
-            ####---    self.render()
+            ###---if self.render_mode == "human":
+            ###---    self.render()
         
-            ####---self.nwstate = attacker.attack(self.net, self.netgraph, self.nwstate, self.critserver, self.mode, self.attackmode)
+            ###---self.nwstate = attacker.attack(self.net, self.netgraph, self.nwstate, self.critserver, 1,  self.mode, self.attackmode)
             # reward function
             #reward, terminated2, reachable_healthy_nodes, reachable_infected_nodes = network.getReward(self.critserver, self.optserver, self.topology, self.nwstate, pFlag, self.netgraph)
             if self.rw_function == 2:
                 reward, terminated2, reachable_healthy_nodes, reachable_infected_nodes, self.data_ex = network.getReward3(self.critserver, self.optserver, self.topology, self.nwstate, pFlag, self.netgraph, action, self.actionSpace, self.block_traffic)
             else:
                 reward, terminated2, reachable_healthy_nodes, reachable_infected_nodes, self.data_ex = network.getReward2(self.critserver, self.optserver, self.topology, self.nwstate, pFlag, self.netgraph, action, self.actionSpace, self.block_traffic)
-            ####--self.actualAction = -2
+            ###--self.actualAction = -2
+            ###---self.actualActionType = ATTACK_ACTION
             #print(self.nwstate)
             self.flatState = network.getVectorFromState2(self.nwstate, self.critserver, self.netgraph)
-            ##### replace # self.observation_state = np.array(self.flatState, dtype=np.float32)
  
             if self.render_mode == "human":
                self.render()
@@ -688,7 +698,6 @@ class cerere_net_v2_env(AECEnv):
                self.truncations = {
                   agent: True for agent in self.agents
             }
-
 
         self.rewards[self.agent_selection] = reward
         self._accumulate_rewards()
