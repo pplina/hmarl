@@ -163,7 +163,17 @@ def custom_logger_creator(custom_path, custom_str=""):
 
 
 ###### Train Begin
-def train_model(iterations, stop_rw, env_name, scenario_name, path2tar, rwf):
+def train_model(
+    iterations,
+    stop_rw,
+    env_name,
+    scenario_name,
+    path2tar,
+    rwf,
+    enterprise_config_set: str | None = None,
+    enterprise_fixed_config_key: str | None = None,
+    enterprise_config_keys: list[str] | None = None,
+):
 
     print(f"Starting training on {str(path2tar)}.")
 
@@ -177,7 +187,14 @@ def train_model(iterations, stop_rw, env_name, scenario_name, path2tar, rwf):
 #       lambda _: ParallelPettingZooEnv(env),
 #    )
 
-    env_kwargs = dict(render_mode=None, rw_func=rwf, scenario=scenario_name)
+    env_kwargs = dict(
+        render_mode=None,
+        rw_func=rwf,
+        scenario=scenario_name,
+        enterprise_config_set=enterprise_config_set,
+        enterprise_fixed_config_key=enterprise_fixed_config_key,
+        enterprise_config_keys=enterprise_config_keys,
+    )
 
     register_env(
         "pettingzoo_cerere",
@@ -273,6 +290,8 @@ def train_hmarl(
     path2tar,
     rwf,
     enterprise_config_set: str | None = None,
+    enterprise_fixed_config_key: str | None = None,
+    enterprise_config_keys: list[str] | None = None,
 ):
 
     env_kwargs = dict(
@@ -280,6 +299,8 @@ def train_hmarl(
         rw_func=rwf,
         scenario=scenario_name,
         enterprise_config_set=enterprise_config_set,
+        enterprise_fixed_config_key=enterprise_fixed_config_key,
+        enterprise_config_keys=enterprise_config_keys,
     )
     register_env(
         "pettingzoo_cerere_hmarl",
@@ -1191,6 +1212,25 @@ if __name__ == "__main__":
             'Alias: --eval_config_set. Default=config_sets/enterprise/default.json'
         ),
     )
+
+    parser.add_argument(
+        '--train_config',
+        type=str,
+        default='',
+        help=(
+            'Fix a single initial config (disables random reset). '
+            'Example: --train_config C1'
+        ),
+    )
+    parser.add_argument(
+        '--train_configs',
+        type=str,
+        default='',
+        help=(
+            'Restrict to a subset of configs (sampling only within that subset). '
+            'Example: --train_configs C1,C3'
+        ),
+    )
     parser.add_argument(
         '--eval_deterministic',
         help='If set, choose argmax actions during manual per-config evaluation (no sampling).',
@@ -1231,7 +1271,19 @@ if __name__ == "__main__":
     elif args.train:
         print("Train model in env %s, scenario %s" % (ENVIRONMENT, SCENARIO))
         start = datetime.datetime.now().replace(microsecond=0)
-        train_model(args.iter, args.stop_rw, ENVIRONMENT, SCENARIO, args.path2tar, args.rwf)
+        train_fixed = args.train_config.strip() or None
+        train_subset = [c.strip() for c in args.train_configs.split(',') if c.strip()] or None
+        train_model(
+            args.iter,
+            args.stop_rw,
+            ENVIRONMENT,
+            SCENARIO,
+            args.path2tar,
+            args.rwf,
+            enterprise_config_set=(args.hmarl_config_set if SCENARIO == "enterprise" else None),
+            enterprise_fixed_config_key=(train_fixed if SCENARIO == "enterprise" else None),
+            enterprise_config_keys=(train_subset if SCENARIO == "enterprise" else None),
+        )
         end = datetime.datetime.now().replace(microsecond=0)
         elapsed = end - start
         print("Stop train model in env %s after %s" % (ENVIRONMENT, elapsed))
@@ -1253,6 +1305,8 @@ if __name__ == "__main__":
     elif args.train_hmarl:
         print("Train HMARL PPO in scenario %s" % SCENARIO)
         start = datetime.datetime.now().replace(microsecond=0)
+        train_fixed = args.train_config.strip() or None
+        train_subset = [c.strip() for c in args.train_configs.split(',') if c.strip()] or None
         train_hmarl(
             args.iter,
             args.stop_rw,
@@ -1260,6 +1314,8 @@ if __name__ == "__main__":
             args.path2tar,
             args.rwf,
             enterprise_config_set=(args.hmarl_config_set if SCENARIO == "enterprise" else None),
+            enterprise_fixed_config_key=(train_fixed if SCENARIO == "enterprise" else None),
+            enterprise_config_keys=(train_subset if SCENARIO == "enterprise" else None),
         )
         end = datetime.datetime.now().replace(microsecond=0)
         elapsed = end - start

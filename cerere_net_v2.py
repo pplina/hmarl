@@ -103,6 +103,8 @@ class cerere_hmarl_env(AECEnv):
         rw_func: int | None = 1,
         scenario: str | None = "military",
         enterprise_config_set: str | None = None,
+        enterprise_fixed_config_key: str | None = None,
+        enterprise_config_keys: list[str] | None = None,
         num_skills: int = 4,
     ):
         super().__init__()
@@ -113,6 +115,8 @@ class cerere_hmarl_env(AECEnv):
             rw_func=rw_func,
             scenario=scenario,
             enterprise_config_set=enterprise_config_set,
+            enterprise_fixed_config_key=enterprise_fixed_config_key,
+            enterprise_config_keys=enterprise_config_keys,
         )
 
         # HMARL agents
@@ -378,6 +382,8 @@ class cerere_net_v2_env(AECEnv):
         rw_func: int | None = 1,
         scenario: str | None = 'military',
         enterprise_config_set: str | None = None,
+        enterprise_fixed_config_key: str | None = None,
+        enterprise_config_keys: list[str] | None = None,
     ):
         """
         The init method takes in environment arguments and
@@ -406,6 +412,27 @@ class cerere_net_v2_env(AECEnv):
                 }
                 self.enterprise_config_set_path = None
             self.config_keys = list(self.infection_configs.keys())
+
+            # Allow restricting/forcing which initial configs can be used
+            if enterprise_config_keys is not None:
+                missing = [k for k in enterprise_config_keys if k not in self.infection_configs]
+                if missing:
+                    raise ValueError(
+                        f"Unknown enterprise_config_keys"
+                    )
+                self.config_keys = list(enterprise_config_keys)
+
+            if enterprise_fixed_config_key is not None:
+                if enterprise_fixed_config_key not in self.infection_configs:
+                    raise ValueError(
+                        f"Unknown enterprise_fixed_config_key"
+                    )
+                if enterprise_fixed_config_key not in self.config_keys:
+                    raise ValueError(
+                        f"enterprise_fixed_config_key not in enterprise_config_keys"
+                    )
+
+            self.enterprise_fixed_config_key = enterprise_fixed_config_key
             #path2topo = "/home/ubuntu/src/rl-test/rlearn/graphs/topo_generic.csv"
             #path2pos = "/home/ubuntu/src/rl-test/rlearn/graphs/pos_generic.csv" 
             path2topo = os.getcwd() + "/rlearn/graphs/topo_generic.csv"
@@ -418,9 +445,10 @@ class cerere_net_v2_env(AECEnv):
                 k: network.getTopologyFromCsv2(path2topo, infected)
                 for k, infected in self.infection_configs.items()
             }
+            # Restrict to requested keys for sampling/forcing
+            self.topologies_by_config = {k: self.topologies_by_config[k] for k in self.config_keys}
             # Default (will be overwritten on first reset)
-            self.selected_config_key = self.config_keys[0]
-            #print(self.selected_config_key)
+            self.selected_config_key = self.enterprise_fixed_config_key or self.config_keys[0]
             self.topology = self.topologies_by_config[self.selected_config_key]
         if scenario == 'military':
             #infected_nodes = ["ac-m-2-4"]
@@ -640,6 +668,10 @@ class cerere_net_v2_env(AECEnv):
             forced = None
             if isinstance(options, dict):
                 forced = options.get("config_key") or options.get("config")
+
+            if forced is None and getattr(self, "enterprise_fixed_config_key", None) is not None:
+                forced = self.enterprise_fixed_config_key
+
             if forced is not None:
                 if forced not in self.topologies_by_config:
                     raise ValueError(

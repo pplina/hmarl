@@ -19,7 +19,6 @@ pip3 install gymnasium==1.0.0
 pip3 install -e gym-examples
 ```
 
-## Usage
 3. To use the implementation execute the command lines below
 
 # NewCERERE
@@ -100,4 +99,37 @@ python3 test-marl.py --eval --rwf 1  --stop_rw 0.83 --iter 100000 --scen militar
 python3 test-marl.py --train_hmarl --scen enterprise --rwf 1 --iter 10000 --stop_rw 999 --path2tar ./exp_hmarl_ppo
 
 python3 test-marl.py --eval_hmarl --eval_table --eval_deterministic --scen enterprise --rwf 10 --eval_episodes 100 --eval_seed 100 --path2tar ./exp_hmarl_ppo_10k
+```
+
+### Training with fixed/subset enterprise configs (disable random selection)
+
+*Train only on a single fixed config (always C1):*
+```
+python3 test-marl.py --train_hmarl --scen enterprise --rwf 1 --iter 100 --stop_rw 999 --path2tar ./exp_hmarl_ppo_C1 --hmarl_config_set config_sets/enterprise/default.json --train_config C1
+```
+
+*Train on a subset of configs (sample only from C1 and C3):*
+```
+python3 test-marl.py train_hmarl --scen enterprise --rwf 1 --iter 10000 --stop_rw 999 --path2tar ./exp_hmarl_ppo_C1C3 --hmarl_config_set config_sets/enterprise/default.json --train_configs C1,C3
+```
+
+*Evaluate only on a single fixed config (only C1):*
+```
+python3 test-marl.py --eval_hmarl --scen enterprise --rwf 1 --path2tar ./exp_hmarl_ppo_C1 --eval_table --eval_episodes 100 --eval_seed 1 --hmarl_config_set config_sets/enterprise/default.json --eval_configs C1
+```
+
+### HMARL enterprise evaluation config sets
+
+Available sets:
+- `config_sets/enterprise/default.json` (the original C1/C2/C3)
+- `config_sets/enterprise/alt_spread.json` (an alternative C1/C2/C3)
+
+*HMARL training with a chosen config set*
+```
+python3 test-marl.py --train_hmarl --scen enterprise --rwf 1 --iter 1000 --stop_rw 999 --path2tar ./exp_hmarl_ppo_custom --hmarl_config_set config_sets/enterprise/default.json
+```
+
+*HMARL evaluation with forced-config table from a chosen config set*
+```
+python3 test-marl.py --eval_hmarl --scen enterprise --rwf 1 --path2tar ./exp_hmarl_ppo_custom --eval_table --eval_episodes 100 --eval_seed 1 --hmarl_config_set config_sets/enterprise/default.json 
 ```

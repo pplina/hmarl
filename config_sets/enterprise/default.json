@@ -8,7 +8,7 @@
     },
     "C2": {
       "description": "Compromises spread across multiple subnets.",
-      "infected_nodes": ["s1_7", "s3_10", "s4_11"]
+      "infected_nodes": ["s3_10", "s1_7", "s2_9"]
     },
     "C3": {
       "description": "More dangerous start in s3 (closer to critical server path).",
