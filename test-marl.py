@@ -66,6 +66,8 @@ class HeuristicAttackModule(RLModule):
     @override(RLModule)
     def _forward(self, batch, **kwargs):
         obs_batch_size = len(tree.flatten(batch[SampleBatch.OBS])[0])
+        print(f"Obs Batch size {obs_batch_size}")
+        print(f"Obs Batch size {tree.flatten(batch[SampleBatch.OBS])[0]}")
 #        print(f"Obs Batch size {obs_batch_size}")
 #        actions = batch_func(
 #            [self.action_space.sample() for _ in range(obs_batch_size)]
@@ -123,33 +125,6 @@ def _resolve_checkpoint_path(path: str) -> str:
 
     return path
 
-class HeuristicAttackModule(RLModule):
-    @override(RLModule)
-    def _forward(self, batch, **kwargs):
-        obs_batch_size = len(tree.flatten(batch[SampleBatch.OBS])[0])
-#        print(f"Obs Batch size {obs_batch_size}")
-#        actions = batch_func(
-#            [self.action_space.sample() for _ in range(obs_batch_size)]
-#        )
-        actions = batch_func(
-            [1 for _ in range(obs_batch_size)]
-        )
-        return {SampleBatch.ACTIONS: actions}
-
-    @override(RLModule)
-    def _forward_train(self, *args, **kwargs):
-        # HeuristicAttackModule should always be configured as non-trainable.
-        # To do so, set in your config:
-        # `config.multi_agent(policies_to_train=[list of ModuleIDs to be trained,
-        # NOT including the ModuleID of this RLModule])`
-        raise NotImplementedError("HeuristicAttackModule: Should not be trained!")
-
-    def compile(self, *args, **kwargs):
-        """Dummy method for compatibility with TorchRLModule.
-
-        This is hit when RolloutWorker tries to compile TorchRLModule."""
- 
-
 
 # Custom logger function 
 def custom_logger_creator(custom_path, custom_str=""):
@@ -190,10 +165,7 @@ def train_model(
     env_kwargs = dict(
         render_mode=None,
         rw_func=rwf,
-        scenario=scenario_name,
-        enterprise_config_set=enterprise_config_set,
-        enterprise_fixed_config_key=enterprise_fixed_config_key,
-        enterprise_config_keys=enterprise_config_keys,
+        scenario=scenario_name
     )
 
     register_env(
@@ -262,10 +234,12 @@ def train_model(
     for i in range(iterations):
        result = model.train()
        print(f"Iter: {i}, Reward mean: {result[ENV_RUNNER_RESULTS][EPISODE_RETURN_MEAN]}")
+       print(f"Iter: {i}, Reward mean p1: {result['env_runners']['module_episode_returns_mean']['p1']}")
        print(f"Iter: {i}, Reward min: {result[ENV_RUNNER_RESULTS][EPISODE_RETURN_MIN]}")
        print(f"Iter {i}, Num steps: {result[NUM_ENV_STEPS_SAMPLED_LIFETIME]}")
        #exit()
-       if result[ENV_RUNNER_RESULTS][EPISODE_RETURN_MEAN] >= stop_rw: ##0.64 ent, 0.83 mil
+       #if result[ENV_RUNNER_RESULTS][EPISODE_RETURN_MEAN] >= stop_rw: ##0.64 ent, 0.83 mil
+       if result['env_runners']['module_episode_returns_mean']['p1'] >= stop_rw: ##0.64 ent, 0.83 mil
            print(f"Reached episode return of {stop_rw} -> stopping ")
            print("####################### Results Train Beginn #########################")
            print(result)
@@ -476,7 +450,6 @@ def train_model_with_tune(iterations, stop_rw, env_name, scenario_name, path2tar
         "pettingzoo_cerere",
         lambda env_config: PettingZooEnv(cerere_net_v2.env(**env_kwargs)),
     )
-
     # Set up logging directory
     tmp_path = "./tb_log/"
     os.makedirs(tmp_path, exist_ok=True)
@@ -523,7 +496,8 @@ def train_model_with_tune(iterations, stop_rw, env_name, scenario_name, path2tar
         .framework(framework="torch")
     )
 
-    stop = {"num_env_steps_sampled_lifetime": iterations, "env_runners/episode_return_mean": stop_rw} ##0.64 ent, 0.83 mil
+    #stop = {"num_env_steps_sampled_lifetime": iterations, "env_runners/episode_return_mean": stop_rw} ##0.64 ent, 0.83 mil
+    stop = {"num_env_steps_sampled_lifetime": iterations, "env_runners/module_episode_returns_mean/p1": stop_rw} ##0.64 ent, 0.83 mil
 
     # Initialize Ray if not already done
     if not ray.is_initialized():
@@ -539,11 +513,11 @@ def train_model_with_tune(iterations, stop_rw, env_name, scenario_name, path2tar
         "PPO",
         config=config,
         stop=stop,
-        metric="env_runners/episode_return_mean",
+#        metric="env_runners/episode_return_mean",
+        metric="env_runners/module_episode_returns_mean/p1",
         mode="max",
         checkpoint_at_end=True,
     )
-    env.close()
     print("###### Analysis Train with Tune ######")
     #print(analysis.best_result)
     #print(analysis.get_best_trial(metric="env_runners/episode_return_mean", mode="max"))
@@ -707,8 +681,7 @@ def eval_model2(
     by_cfg_success: dict[int, list[int]] = {}
 
     for i in range(n_episodes):
-        env.reset(seed=base_seed , options={"config_key": "C1"})
-        #env.reset(seed=base_seed + i)
+        env.reset(seed=None , options={"config_key": "C1"})
         cfg_key = getattr(env.unwrapped, "selected_config_key", None)
         cfg_id = env.infos[env.possible_agents[0]].get("config_id") if env.infos else None
 

@@ -7,9 +7,9 @@ import random
 
 
 def attack(net, netgraph, nwstate, critserver, action, mode, attmode):
-		
+#def attack(netgraph, nwstate, critserver, action, attmode):		
     if (action != 1):
-        #print("Unknown action")
+        print("Unknown attack action %d" % action)
         return nwstate
 
     # Collect all infected Nodes
@@ -51,9 +51,10 @@ def attack(net, netgraph, nwstate, critserver, action, mode, attmode):
                         bestVictim = possVictim
             if bestVictim != 0:
                 # Infest best Victim, if any
-                index = nwstate.index([0, bestVictim])
-                nwstate[index] = [1, bestVictim]
-                ##print("Attacked node %s " % bestVictim)
+                ######index = nwstate.index([0, bestVictim])
+                ######nwstate[index] = [1, bestVictim]
+                ######print("Attacked node %s " % bestVictim)
+                nwstate = compromiseNode(nwstate, bestVictim)
     elif attmode == 1:  # Infect nodes infects all nodes neighbourhood
         # selected_attnode = random.choice(attnodes)
         print("All attnodes %s (all can infect all)" % attnodes)
@@ -74,8 +75,9 @@ def attack(net, netgraph, nwstate, critserver, action, mode, attmode):
                     continue
                 # Infest all possible Victims
                 if linkpair[0] == 1:
-                    index = nwstate.index([0, possVictim])
-                    nwstate[index] = [1, possVictim]
+                    nwstate = compromiseNode(nwstate, possVictim)
+                    #index = nwstate.index([0, possVictim])
+                    #nwstate[index] = [1, possVictim]
     # One infected node can only infect one node in neighbourhood
     elif attmode == 2:
         print("All attnodes %s (one can infect one)" % attnodes)
@@ -117,11 +119,23 @@ def attack(net, netgraph, nwstate, critserver, action, mode, attmode):
                 # index = nwstate.index([0,bestVictim])
                 # nwstate[index] = [1, bestVictim]
         mybestVictim = random.choice(mybestVictimList)
-        print("Selcted new node to attack %s from list %s" % (mybestVictim, mybestVictimList))
-        index = nwstate.index([0, mybestVictim])
-        nwstate[index] = [1, mybestVictim]
+        print("Selcted rnd node to attack %s from list %s" % (mybestVictim, mybestVictimList))
+        nwstate = compromiseNode(nwstate, mybestVictim)
+        #index = nwstate.index([0, mybestVictim])
+        #nwstate[index] = [1, mybestVictim]
     else:
         print("Unknown attmode")
         exit(1)
     # Return new NWSTATE
     return nwstate
+
+
+def compromiseNode(nwstate, victim):
+   index = nwstate.index([0, victim])
+   nwstate[index] = [1, victim]
+   #print("Compromise node %s " % victim)
+   return nwstate 
+
+
+
+

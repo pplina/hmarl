@@ -109,8 +109,38 @@ def getVectorFromState2(nwstate, critserver, netgraph):
             flatState.append(1)
         else:
             flatState.append(d / 8)
-
     return flatState
+
+"""
+def getVectorFromState2(nwstate, critserver, netgraph):
+    flatState = []
+    #print(nwstate)
+    for value in nwstate:
+        flatState.append(value[0])
+        #if (len(value) == 2): 
+        #    print("Node %s state %s (%d)" % (value[1], value[0],len(value))) 
+        #if (len(value) == 3): 
+        #    print("Node %s link %s (%d)" % (value[1], value[0],len(value))) 
+        if len(value) == 2:  
+            if value[1] == critserver:
+                #flatState.append(1)
+                #print("Critserver %s to critserver conn state 1 (%d)" % (value[1], len(value)))
+                flatState.append(0)
+                #print("Critserver %s to critserver conn state 0 (%d)" % (value[1], len(value)))
+            else:
+                if len(reachable_node_list2(critserver, value[1], netgraph)) == 0:
+                    #flatState.append(0)
+                    #print("Node %s to critserver conn state 0 (%d)" % (value[1],len(value)))
+                    flatState.append(1)
+                    #print("Node %s to critserver conn state 1 (%d)" % (value[1],len(value))
+                else: 
+                    #flatState.append(1)
+                    #print("Node %s to critserver conn state 1 (%d)" % (value[1], len(value)))
+                    shortestpath = nx.shortest_path_length(netgraph, value[1], critserver)
+                    #print("Node %s to critserver conn state %s (%d)" % (value[1], str(shortestpath/8) ,len(value)))
+                    flatState.append(shortestpath/8)
+    return flatState
+"""
 
 
 def createNetwork(net, netgraph, topology, mode):

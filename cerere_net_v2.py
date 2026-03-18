@@ -382,7 +382,7 @@ class cerere_net_v2_env(AECEnv):
         rw_func: int | None = 1,
         scenario: str | None = 'military',
         enterprise_config_set: str | None = None,
-        enterprise_fixed_config_key: str | None = None,
+        enterprise_fixed_config_key: str | None = "C1",
         enterprise_config_keys: list[str] | None = None,
     ):
         """
@@ -461,14 +461,14 @@ class cerere_net_v2_env(AECEnv):
             self.init_critserver = self.critserver = "as-hq"
             self.init_optserver = self.optserver = ["as-hqa", "as-hqa2"] # ["ash_hqa"]  # what is ash_hqa?
             self.block_traffic = 0
-# Pre-build topologies once
+            # Pre-build topologies once
             self.topologies_by_config = {
                 k: network.getTopologyFromCsv2(path2topo, infected)
                 for k, infected in self.infection_configs.items()
             }
-# Default (will be overwritten on first reset)
-            self.selected_config_key = self.config_keys[0]
-            #print(self.selected_config_key)
+            # Restrict to requested keys for sampling/forcing
+            self.topologies_by_config = {k: self.topologies_by_config[k] for k in self.config_keys}
+            self.selected_config_key = self.enterprise_fixed_config_key or self.config_keys[0]
             self.topology = self.topologies_by_config[self.selected_config_key]
 
         self.net = None  # mininet is not used
@@ -682,6 +682,7 @@ class cerere_net_v2_env(AECEnv):
                 if seed is not None:
                     random.seed(seed)
                 self.selected_config_key = random.choice(self.config_keys)
+            print(self.selected_config_key)
             self.topology = self.topologies_by_config[self.selected_config_key]
         self.netgraph = nx.Graph()
         self.netgraph = network.createNetwork(self.net, self.netgraph, self.topology, self.mode)
