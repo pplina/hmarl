@@ -299,6 +299,7 @@ def train_hmarl(
 
     # Policy IDs
     policies = {
+        "pi_attacker",
         "pi_manager",
         "pi_worker_0",
         "pi_worker_1",
@@ -308,6 +309,8 @@ def train_hmarl(
     }
 
     def policy_mapping_fn(agent_id, episode, **kwargs):
+        if agent_id == "attacker":
+            return "pi_attacker"
         if agent_id == "manager":
             return "pi_manager"
         if agent_id.startswith("worker_"):
@@ -332,11 +335,12 @@ def train_hmarl(
         .multi_agent(
             policies=policies,
             policy_mapping_fn=policy_mapping_fn,
-            policies_to_train=list(policies),
+            policies_to_train=[p for p in policies if p != "pi_attacker"],
         )
         .rl_module(
             rl_module_spec=MultiRLModuleSpec(
                 rl_module_specs={
+                    "pi_attacker": RLModuleSpec(module_class=HeuristicAttackModule),
                     "pi_manager": RLModuleSpec(),
                     "pi_worker_0": RLModuleSpec(module_class=ActionMaskingTorchRLModule),
                     "pi_worker_1": RLModuleSpec(module_class=ActionMaskingTorchRLModule),
@@ -393,6 +397,7 @@ def eval_hmarl(
     os.makedirs(tmp_path, exist_ok=True)
 
     policies = {
+        "pi_attacker",
         "pi_manager",
         "pi_worker_0",
         "pi_worker_1",
@@ -402,6 +407,8 @@ def eval_hmarl(
     }
 
     def policy_mapping_fn(agent_id, episode, **kwargs):
+        if agent_id == "attacker":
+            return "pi_attacker"
         if agent_id == "manager":
             return "pi_manager"
         if agent_id.startswith("worker_"):
@@ -417,11 +424,12 @@ def eval_hmarl(
         .multi_agent(
             policies=policies,
             policy_mapping_fn=policy_mapping_fn,
-            policies_to_train=list(policies),
+            policies_to_train=[p for p in policies if p != "pi_attacker"],
         )
         .rl_module(
             rl_module_spec=MultiRLModuleSpec(
                 rl_module_specs={
+                    "pi_attacker": RLModuleSpec(module_class=HeuristicAttackModule),
                     "pi_manager": RLModuleSpec(),
                     "pi_worker_0": RLModuleSpec(module_class=ActionMaskingTorchRLModule),
                     "pi_worker_1": RLModuleSpec(module_class=ActionMaskingTorchRLModule),
@@ -952,6 +960,7 @@ def eval_hmarl_manual_forced_configs(
         )
 
     modules = {
+        "pi_attacker": _load_module("pi_attacker"),
         "pi_manager": _load_module("pi_manager"),
         "pi_worker_0": _load_module("pi_worker_0"),
         "pi_worker_1": _load_module("pi_worker_1"),
@@ -961,6 +970,8 @@ def eval_hmarl_manual_forced_configs(
     }
 
     def policy_for_agent(agent_id: str) -> str:
+        if agent_id == "attacker":
+            return "pi_attacker"
         if agent_id == "manager":
             return "pi_manager"
         if agent_id.startswith("worker_"):
@@ -981,7 +992,35 @@ def eval_hmarl_manual_forced_configs(
             input_dict = {Columns.OBS: torch.from_numpy(obs).unsqueeze(0)}
 
         out = mod.forward_inference(input_dict)
+
+        if isinstance(out, dict) and (Columns.ACTIONS in out or SampleBatch.ACTIONS in out):
+            acts = out.get(Columns.ACTIONS, out.get(SampleBatch.ACTIONS))
+            acts = convert_to_numpy(acts)
+            act0 = acts[0]
+            if isinstance(action_space, gymnasium.spaces.MultiDiscrete):
+                return np.array(act0, dtype=np.int64)
+            return int(act0)
+
+        if not isinstance(out, dict) or Columns.ACTION_DIST_INPUTS not in out:
+            keys = list(out.keys()) if isinstance(out, dict) else type(out)
+            raise KeyError(
+                "RLModule.forward_inference() output does not contain action logits nor direct actions"
+            )
+
         logits = convert_to_numpy(out[Columns.ACTION_DIST_INPUTS])[0]
+
+        def _safe_softmax(vec: np.ndarray) -> np.ndarray:
+            vec = np.asarray(vec, dtype=np.float64)
+            vec = np.where(np.isfinite(vec), vec, -1e9)
+            m = np.max(vec)
+            exps = np.exp(vec - m)
+            denom = np.sum(exps)
+            if not np.isfinite(denom) or denom <= 0:
+                return np.ones_like(vec, dtype=np.float64) / float(len(vec))
+            p = exps / denom
+            if not np.all(np.isfinite(p)) or np.any(p < 0) or np.sum(p) <= 0:
+                return np.ones_like(vec, dtype=np.float64) / float(len(vec))
+            return p
 
         if isinstance(action_space, gymnasium.spaces.MultiDiscrete):
             nvec = list(action_space.nvec)
@@ -992,13 +1031,16 @@ def eval_hmarl_manual_forced_configs(
                 if deterministic:
                     action.append(int(np.argmax(seg)))
                 else:
-                    action.append(int(np.random.choice(n, p=softmax(seg))))
+                    p = _safe_softmax(seg)
+                    action.append(int(np.random.choice(n, p=p)))
                 idx += n
             return np.array(action, dtype=np.int64)
 
         if deterministic:
             return int(np.argmax(logits))
-        return int(np.random.choice(action_space.n, p=softmax(logits)))
+
+        p = _safe_softmax(logits)
+        return int(np.random.choice(action_space.n, p=p))
 
     out = {}
     for cfg in configs:
@@ -1143,7 +1185,10 @@ def test_hmarl(in_scenario: str, rwf: int, max_env_cycles: int = 300):
         if termination or truncation:
             action = None
         else:
-            action = env.action_space(agent).sample()
+            if agent == "attacker":
+                action = 1
+            else:
+                action = env.action_space(agent).sample()
         env.step(action)
         cycles += 1
         if cycles > max_env_cycles:

@@ -119,11 +119,16 @@ class cerere_hmarl_env(AECEnv):
             enterprise_config_keys=enterprise_config_keys,
         )
 
+        #   manager -> workers -> attacker
+        self.attacker_id = "attacker"
+
         # HMARL agents
         self.manager_id = "manager"
         self.worker_ids = [f"worker_{i}" for i in range(4)]
         self.worker_mig_id = "worker_mig"
-        self.possible_agents = [self.manager_id] + self.worker_ids + [self.worker_mig_id]
+        self.possible_agents = (
+            [self.manager_id] + self.worker_ids + [self.worker_mig_id] + [self.attacker_id]
+        )
         self.agents = []
 
         # Manager selects from a valid set of (skill, worker) combinations        #
@@ -138,9 +143,13 @@ class cerere_hmarl_env(AECEnv):
         # All workers output a primitive action index
         self._worker_action_space = spaces.Discrete(len(self.base_env.actionSpace))
 
+        # Attacker action space is 2 actions: 0=no-op, 1=attack
+        self._attacker_action_space = spaces.Discrete(2)
+
         self._action_spaces = {self.manager_id: self._manager_action_space}
         for wid in self.worker_ids + [self.worker_mig_id]:
             self._action_spaces[wid] = self._worker_action_space
+        self._action_spaces[self.attacker_id] = self._attacker_action_space
 
         # manager obs is a plain Box(flatState)
         # workers obs is Dict({"observations": flatState, "action_mask": mask})
@@ -157,10 +166,17 @@ class cerere_hmarl_env(AECEnv):
         self._observation_spaces = {self.manager_id: base_box}
         for wid in self.worker_ids + [self.worker_mig_id]:
             self._observation_spaces[wid] = worker_dict
+        self._observation_spaces[self.attacker_id] = base_box
 
         # Internal HMARL control state
         self._selected_worker: str | None = None
         self._selected_skill: int | None = None
+
+        # Tracks whether the current cycle already applied a defender action
+        self._pending_defender_transition: bool = False
+
+        self._last_def_action: int | None = None
+        self._last_def_pflag: int = 0
 
         self._subnets: list[list[str]] = self._compute_subnets_deterministic(
             self.base_env.netgraph
@@ -226,6 +242,9 @@ class cerere_hmarl_env(AECEnv):
         # Reset HMARL control variables
         self._selected_worker = None
         self._selected_skill = None
+        self._pending_defender_transition = False
+        self._last_def_action = None
+        self._last_def_pflag = 0
 
         # Set observations
         base_obs = np.array(self.base_env.flatState, dtype=np.float32)
@@ -236,6 +255,7 @@ class cerere_hmarl_env(AECEnv):
                 "observations": base_obs,
                 "action_mask": self._compute_action_mask(wid),
             }
+        self.observations[self.attacker_id] = base_obs
         self.state = {agent: None for agent in self.agents}
 
     def _sync_obs_from_base(self):
@@ -246,6 +266,7 @@ class cerere_hmarl_env(AECEnv):
                 "observations": base_obs,
                 "action_mask": self._compute_action_mask(wid),
             }
+        self.observations[self.attacker_id] = base_obs
 
     def _compute_subnets_deterministic(self, g: nx.Graph) -> list[list[str]]:
         buckets: dict[str, list[str]] = {"s1": [], "s2": [], "s3": [], "s4": []}
@@ -320,6 +341,77 @@ class cerere_hmarl_env(AECEnv):
             # No environment dynamics on manager step.
             self.rewards[agent] = 0.0
 
+        elif agent == self.attacker_id:
+            # Apply attack after a defender action has been applied
+            if not self._pending_defender_transition:
+                # If attacker is called too early (e.g., first after reset), ignore
+                self.rewards[agent] = 0.0
+            else:
+                # Execute attacker action 
+                self.base_env.actualActionType = ATTACK_ACTION
+                self.base_env.actualAction = int(action)
+                self.base_env.nwstate = attacker.attack(
+                    self.base_env.net,
+                    self.base_env.netgraph,
+                    self.base_env.nwstate,
+                    self.base_env.critserver,
+                    int(action),
+                    self.base_env.mode,
+                    self.base_env.attackmode,
+                )
+                # Update observation vector after attack
+                self.base_env.flatState = network.getVectorFromState2(
+                    self.base_env.nwstate, self.base_env.critserver, self.base_env.netgraph
+                )
+
+                # Compute reward after both defender and attacker acted
+                last_def_action = self._last_def_action
+                if last_def_action is None:
+                    last_def_action = len(self.base_env.actionSpace) - 1
+
+                pFlag = int(self._last_def_pflag)
+                if self.base_env.rw_function == 2:
+                    rew, terminated2, *_rest = network.getReward3(
+                        self.base_env.critserver,
+                        self.base_env.optserver,
+                        self.base_env.topology,
+                        self.base_env.nwstate,
+                        pFlag,
+                        self.base_env.netgraph,
+                        int(last_def_action),
+                        self.base_env.actionSpace,
+                        self.base_env.block_traffic,
+                    )
+                else:
+                    rew, terminated2, *_rest = network.getReward2(
+                        self.base_env.critserver,
+                        self.base_env.optserver,
+                        self.base_env.topology,
+                        self.base_env.nwstate,
+                        pFlag,
+                        self.base_env.netgraph,
+                        int(last_def_action),
+                        self.base_env.actionSpace,
+                        self.base_env.block_traffic,
+                    )
+
+                defender_reward = float(rew)
+
+                # Give team reward to manager + selected worker
+                if self._selected_worker is not None:
+                    self.rewards[self.manager_id] = defender_reward
+                    self.rewards[self._selected_worker] = defender_reward
+                # Attacker reward 0
+                self.rewards[self.attacker_id] = 0.0
+
+                self._pending_defender_transition = False
+                self._last_def_action = None
+                self._last_def_pflag = 0
+                self._sync_obs_from_base()
+
+                if terminated2 == 1:
+                    self.truncations = {aid: True for aid in self.agents}
+
         else:
             # Worker steps
             if self._selected_worker is None:
@@ -333,25 +425,31 @@ class cerere_hmarl_env(AECEnv):
                 if int(action) < 0 or int(action) >= len(mask) or mask[int(action)] < 0.5:
                     action = self._worker_action_space.n - 1
 
-                self.base_env.agent_selection = "player_0"
-                self.base_env.step(self.base_env.action_space("player_0").sample())
-                self.base_env.agent_selection = "player_1"
-                self.base_env.step(int(action))
-
-                defender_reward = float(self.base_env.rewards.get("player_1", 0.0))
-
-                # Only manager + selected worker receive the reward
-                # Non-selected workers get 0.0 to avoid training on unrelated signal
-                self.rewards[self.manager_id] = defender_reward
-                self.rewards[agent] = defender_reward
-
-                # Sync observation and done flags
-                self._sync_obs_from_base()
-                done = any(self.base_env.truncations.values()) or any(
-                    self.base_env.terminations.values()
+                # Apply defender action directly to base state (without running attacker here)
+                self.base_env.actualActionType = DEFENSE_ACTION
+                self.base_env.actualAction = int(action)
+                self.base_env.nwstate, self.base_env.netgraph, pFlag, self.base_env.critserver, self.base_env.optserver, self.base_env.block_traffic = defender.getAction(
+                    self.base_env.net,
+                    self.base_env.netgraph,
+                    self.base_env.critserver,
+                    self.base_env.optserver,
+                    int(action),
+                    self.base_env.actionSpace,
+                    self.base_env.topology,
+                    self.base_env.nwstate,
+                    self.base_env.block_traffic,
                 )
-                if done:
-                    self.truncations = {aid: True for aid in self.agents}
+                self.base_env.flatState = network.getVectorFromState2(
+                    self.base_env.nwstate, self.base_env.critserver, self.base_env.netgraph
+                )
+
+                self._last_def_action = int(action)
+                self._last_def_pflag = int(pFlag)
+                self.base_env.mystep = getattr(self.base_env, "mystep", 0) + 1
+
+                self._pending_defender_transition = True
+                self._sync_obs_from_base()
+                self.rewards[agent] = 0.0
 
         self._accumulate_rewards()
         self.agent_selection = self._agent_selector.next()
