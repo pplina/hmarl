@@ -20,6 +20,10 @@ from ray.rllib.algorithms.ppo import PPO
 from ray.rllib.algorithms.dqn import DQN
 from ray.rllib.algorithms.ppo import PPOConfig
 from ray.rllib.algorithms.dqn import DQNConfig
+
+from ray.rllib.algorithms.algorithm import Algorithm
+from ray.rllib.algorithms.algorithm_config import AlgorithmConfig
+
 from ray.tune.registry import register_env
 from ray.tune.logger import UnifiedLogger
 from ray.rllib.core.rl_module.rl_module import RLModuleSpec
@@ -65,9 +69,14 @@ import cerere_net_v2
 class HeuristicAttackModule(RLModule):
     @override(RLModule)
     def _forward(self, batch, **kwargs):
+
+        print(self)
+
         obs_batch_size = len(tree.flatten(batch[SampleBatch.OBS])[0])
+        print(f"Obs Batch {batch[SampleBatch.OBS]}")
+        #print(f"Actions Batch {batch[SampleBatch.ACTIONS]}")
         print(f"Obs Batch size {obs_batch_size}")
-        print(f"Obs Batch size {tree.flatten(batch[SampleBatch.OBS])[0]}")
+        print(f"Obs Batch2 {tree.flatten(batch[SampleBatch.OBS])[0]}")
 #        print(f"Obs Batch size {obs_batch_size}")
 #        actions = batch_func(
 #            [self.action_space.sample() for _ in range(obs_batch_size)]
@@ -90,7 +99,8 @@ class HeuristicAttackModule(RLModule):
 
         This is hit when RolloutWorker tries to compile TorchRLModule."""
 
-    def manual_forward(self):
+    def manual_forward():
+        print("Fuction manual_forward")
         action = 1
         return action
  
@@ -563,6 +573,7 @@ def eval_model(in_render_mode, in_scenario, path2tar, in_rwf):
         PPOConfig()
         .environment("pettingzoo_cerere")
         .env_runners(
+            create_env_on_local_worker=True,
             num_env_runners=0,
 #            env_to_module_connector=lambda env: (
 #                # `agent_ids=...`: Only flatten obs for the learning RLModule.
@@ -578,22 +589,17 @@ def eval_model(in_render_mode, in_scenario, path2tar, in_rwf):
         .rl_module(
             rl_module_spec=MultiRLModuleSpec(
                 rl_module_specs={
-                    "p0": RLModuleSpec(module_class=RandomRLModule),
+                    "p0": RLModuleSpec(module_class=HeuristicAttackModule),
                     "p1": RLModuleSpec(),
                 }
             ),
         )
         .debugging(log_level="ERROR", logger_creator=custom_logger_creator(tmp_path, "ppo_cerere"))
-        .framework(framework="torch")
+        .framework(framework="torch")     
         .evaluation(
-            evaluation_num_env_runners=0,
-            evaluation_interval=9999999999,
-#            evaluation_interval=1, # one eval per iteration
             evaluation_duration_unit="episodes",
             evaluation_duration=1,
-            evaluation_config={
-                "explore": False,
-            },
+            evaluation_config={"explore": False},
         )
     )
 
@@ -626,7 +632,6 @@ def eval_model(in_render_mode, in_scenario, path2tar, in_rwf):
             vals = per_cfg[cid]
             print(f"  C{cid+1}: n={len(vals)}, mean={sum(vals)/len(vals):.4f}")
     print("####################### Results Eval End    #########################")
-    env.close()
 ###### Eval End
 
 
@@ -690,13 +695,15 @@ def eval_model2(
 
         for agent in env.agent_iter():
             observation, reward, termination, truncation, info = env.last()
-            ep_returns[agent] += float(reward)
+            #ep_returns[agent] += float(reward)
 
             if termination or truncation:
                 action = None
             else:
                 if agent == env.possible_agents[0]:
                     #action = env.action_space(agent).sample()
+                    input_dict = {Columns.OBS: torch.from_numpy(observation).unsqueeze(0)}
+                    #ham.manual_forward()
                     action = 1
                     print("AGENT %s attempted to do %d" % (str(agent), action))
                 else: 
@@ -709,8 +716,9 @@ def eval_model2(
                     # Select action without exploration
                     action = np.argmax(softmax(logits[0]))
                     print("AGENT %s attempted do %d" % (str(agent), action))         
-            env.step(action)          
-
+            env.step(action)  
+            # Episode return per agent
+            ep_returns[agent] = float(reward)
 
         # Success criterion: critical server not infected at episode end
         crit = getattr(env.unwrapped, "critserver", None)
@@ -1228,16 +1236,8 @@ if __name__ == "__main__":
     elif args.eval:
         print("Eval model in env %s, scenario %s" % (ENVIRONMENT, SCENARIO))
         start = datetime.datetime.now().replace(microsecond=0)
-        #eval_model("human", SCENARIO, args.path2tar, args.rwf)
-        eval_model2(
-            "human",
-            SCENARIO,
-            args.path2tar,
-            args.rwf,
-            n_episodes=args.eval_episodes,
-            base_seed=args.eval_seed,
-            verbose=False,
-        )
+        eval_model("human", SCENARIO, args.path2tar, args.rwf)
+        #eval_model2("human", SCENARIO, args.path2tar, args.rwf, n_episodes=args.eval_episodes, base_seed=args.eval_seed,  verbose=False )
         end = datetime.datetime.now().replace(microsecond=0)
         elapsed = end - start
         print("Stop eval model in env %s after %s" % (ENVIRONMENT, elapsed))

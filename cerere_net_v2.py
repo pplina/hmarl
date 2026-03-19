@@ -456,7 +456,9 @@ class cerere_net_v2_env(AECEnv):
                 "C1": ["ac-m-2-4"],
             }
             self.config_keys = list(self.infection_configs.keys())
-            path2topo = os.getcwd() + "/rlearn/graphs/topo_cerere_multi.csv"
+            self.enterprise_fixed_config_key = enterprise_fixed_config_key
+            path2topo = os.getcwd() + "/rlearn/graphs/topo_cerere.csv"
+            #path2topo = os.getcwd() + "/rlearn/graphs/topo_cerere_multi.csv"
             path2pos = os.getcwd() + "/rlearn/graphs/pos_cerere.csv"
             self.init_critserver = self.critserver = "as-hq"
             self.init_optserver = self.optserver = ["as-hqa", "as-hqa2"] # ["ash_hqa"]  # what is ash_hqa?
