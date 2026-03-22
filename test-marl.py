@@ -276,6 +276,7 @@ def train_hmarl(
     enterprise_config_set: str | None = None,
     enterprise_fixed_config_key: str | None = None,
     enterprise_config_keys: list[str] | None = None,
+    shared_patch_policy: bool = False,
 ):
 
     env_kwargs = dict(
@@ -298,15 +299,23 @@ def train_hmarl(
     os.makedirs(tmp_path, exist_ok=True)
 
     # Policy IDs
-    policies = {
-        "pi_attacker",
-        "pi_manager",
-        "pi_worker_0",
-        "pi_worker_1",
-        "pi_worker_2",
-        "pi_worker_3",
-        "pi_worker_mig",
-    }
+    if shared_patch_policy:
+        policies = {
+            "pi_attacker",
+            "pi_manager",
+            "pi_worker_patch",
+            "pi_worker_mig",
+        }
+    else:
+        policies = {
+            "pi_attacker",
+            "pi_manager",
+            "pi_worker_0",
+            "pi_worker_1",
+            "pi_worker_2",
+            "pi_worker_3",
+            "pi_worker_mig",
+        }
 
     def policy_mapping_fn(agent_id, episode, **kwargs):
         if agent_id == "attacker":
@@ -314,6 +323,8 @@ def train_hmarl(
         if agent_id == "manager":
             return "pi_manager"
         if agent_id.startswith("worker_"):
+            if shared_patch_policy and agent_id in {"worker_0", "worker_1", "worker_2", "worker_3"}:
+                return "pi_worker_patch"
             return f"pi_{agent_id}"
         if agent_id == "worker_mig":
             return "pi_worker_mig"
@@ -342,10 +353,18 @@ def train_hmarl(
                 rl_module_specs={
                     "pi_attacker": RLModuleSpec(module_class=HeuristicAttackModule),
                     "pi_manager": RLModuleSpec(),
-                    "pi_worker_0": RLModuleSpec(module_class=ActionMaskingTorchRLModule),
-                    "pi_worker_1": RLModuleSpec(module_class=ActionMaskingTorchRLModule),
-                    "pi_worker_2": RLModuleSpec(module_class=ActionMaskingTorchRLModule),
-                    "pi_worker_3": RLModuleSpec(module_class=ActionMaskingTorchRLModule),
+                    **(
+                        {
+                            "pi_worker_patch": RLModuleSpec(module_class=ActionMaskingTorchRLModule),
+                        }
+                        if shared_patch_policy
+                        else {
+                            "pi_worker_0": RLModuleSpec(module_class=ActionMaskingTorchRLModule),
+                            "pi_worker_1": RLModuleSpec(module_class=ActionMaskingTorchRLModule),
+                            "pi_worker_2": RLModuleSpec(module_class=ActionMaskingTorchRLModule),
+                            "pi_worker_3": RLModuleSpec(module_class=ActionMaskingTorchRLModule),
+                        }
+                    ),
                     "pi_worker_mig": RLModuleSpec(module_class=ActionMaskingTorchRLModule),
                 }
             )
@@ -377,6 +396,7 @@ def eval_hmarl(
     n_episodes: int = 10,
     base_seed: int = 42,
     enterprise_config_set: str | None = None,
+    shared_patch_policy: bool = False,
 ):
     """Evaluate a HMARL checkpoint by running RLlib's evaluate() API."""
     env_kwargs = dict(
@@ -396,15 +416,23 @@ def eval_hmarl(
     tmp_path = "./tb_log/"
     os.makedirs(tmp_path, exist_ok=True)
 
-    policies = {
-        "pi_attacker",
-        "pi_manager",
-        "pi_worker_0",
-        "pi_worker_1",
-        "pi_worker_2",
-        "pi_worker_3",
-        "pi_worker_mig",
-    }
+    if shared_patch_policy:
+        policies = {
+            "pi_attacker",
+            "pi_manager",
+            "pi_worker_patch",
+            "pi_worker_mig",
+        }
+    else:
+        policies = {
+            "pi_attacker",
+            "pi_manager",
+            "pi_worker_0",
+            "pi_worker_1",
+            "pi_worker_2",
+            "pi_worker_3",
+            "pi_worker_mig",
+        }
 
     def policy_mapping_fn(agent_id, episode, **kwargs):
         if agent_id == "attacker":
@@ -412,6 +440,8 @@ def eval_hmarl(
         if agent_id == "manager":
             return "pi_manager"
         if agent_id.startswith("worker_"):
+            if shared_patch_policy and agent_id in {"worker_0", "worker_1", "worker_2", "worker_3"}:
+                return "pi_worker_patch"
             return f"pi_{agent_id}"
         if agent_id == "worker_mig":
             return "pi_worker_mig"
@@ -431,10 +461,18 @@ def eval_hmarl(
                 rl_module_specs={
                     "pi_attacker": RLModuleSpec(module_class=HeuristicAttackModule),
                     "pi_manager": RLModuleSpec(),
-                    "pi_worker_0": RLModuleSpec(module_class=ActionMaskingTorchRLModule),
-                    "pi_worker_1": RLModuleSpec(module_class=ActionMaskingTorchRLModule),
-                    "pi_worker_2": RLModuleSpec(module_class=ActionMaskingTorchRLModule),
-                    "pi_worker_3": RLModuleSpec(module_class=ActionMaskingTorchRLModule),
+                    **(
+                        {
+                            "pi_worker_patch": RLModuleSpec(module_class=ActionMaskingTorchRLModule),
+                        }
+                        if shared_patch_policy
+                        else {
+                            "pi_worker_0": RLModuleSpec(module_class=ActionMaskingTorchRLModule),
+                            "pi_worker_1": RLModuleSpec(module_class=ActionMaskingTorchRLModule),
+                            "pi_worker_2": RLModuleSpec(module_class=ActionMaskingTorchRLModule),
+                            "pi_worker_3": RLModuleSpec(module_class=ActionMaskingTorchRLModule),
+                        }
+                    ),
                     "pi_worker_mig": RLModuleSpec(module_class=ActionMaskingTorchRLModule),
                 }
             )
@@ -949,6 +987,7 @@ def eval_hmarl_manual_forced_configs(
     base_seed: int = 42,
     deterministic: bool = True,
     enterprise_config_set: str | None = None,
+    shared_patch_policy: bool = False,
 ):
 
     env = cerere_net_v2.hmarl_env(
@@ -973,15 +1012,23 @@ def eval_hmarl_manual_forced_configs(
             )
         )
 
-    modules = {
-        "pi_attacker": _load_module("pi_attacker"),
-        "pi_manager": _load_module("pi_manager"),
-        "pi_worker_0": _load_module("pi_worker_0"),
-        "pi_worker_1": _load_module("pi_worker_1"),
-        "pi_worker_2": _load_module("pi_worker_2"),
-        "pi_worker_3": _load_module("pi_worker_3"),
-        "pi_worker_mig": _load_module("pi_worker_mig"),
-    }
+    if shared_patch_policy:
+        modules = {
+            "pi_attacker": _load_module("pi_attacker"),
+            "pi_manager": _load_module("pi_manager"),
+            "pi_worker_patch": _load_module("pi_worker_patch"),
+            "pi_worker_mig": _load_module("pi_worker_mig"),
+        }
+    else:
+        modules = {
+            "pi_attacker": _load_module("pi_attacker"),
+            "pi_manager": _load_module("pi_manager"),
+            "pi_worker_0": _load_module("pi_worker_0"),
+            "pi_worker_1": _load_module("pi_worker_1"),
+            "pi_worker_2": _load_module("pi_worker_2"),
+            "pi_worker_3": _load_module("pi_worker_3"),
+            "pi_worker_mig": _load_module("pi_worker_mig"),
+        }
 
     def policy_for_agent(agent_id: str) -> str:
         if agent_id == "attacker":
@@ -989,6 +1036,8 @@ def eval_hmarl_manual_forced_configs(
         if agent_id == "manager":
             return "pi_manager"
         if agent_id.startswith("worker_"):
+            if shared_patch_policy and agent_id in {"worker_0", "worker_1", "worker_2", "worker_3"}:
+                return "pi_worker_patch"
             return f"pi_{agent_id}"
         if agent_id == "worker_mig":
             return "pi_worker_mig"
@@ -1237,6 +1286,11 @@ if __name__ == "__main__":
     parser.add_argument('--test_hmarl', help="Smoke-test HMARL env (no RLlib)", action="store_true")
     parser.add_argument('--train_hmarl', help="Train PPO on HMARL env", action="store_true")
     parser.add_argument('--eval_hmarl', help="Eval PPO checkpoint on HMARL env", action="store_true")
+    parser.add_argument(
+        '--hmarl_shared_patch',
+        help='If set, share parameters across worker_0..worker_3 via single policy pi_worker_patch.',
+        action='store_true'
+    )
     parser.add_argument('--iter', type=int, default=50000,
                         help='Number of trainings iterations (ent=100000/mil=100000) , default = 50000')
     parser.add_argument('--stop_rw', type=float, default=0.1,
@@ -1362,6 +1416,7 @@ if __name__ == "__main__":
             enterprise_config_set=(args.hmarl_config_set if SCENARIO == "enterprise" else None),
             enterprise_fixed_config_key=(train_fixed if SCENARIO == "enterprise" else None),
             enterprise_config_keys=(train_subset if SCENARIO == "enterprise" else None),
+            shared_patch_policy=bool(args.hmarl_shared_patch),
         )
         end = datetime.datetime.now().replace(microsecond=0)
         elapsed = end - start
@@ -1378,6 +1433,7 @@ if __name__ == "__main__":
             n_episodes=args.eval_episodes,
             base_seed=args.eval_seed,
             enterprise_config_set=(args.hmarl_config_set if SCENARIO == "enterprise" else None),
+            shared_patch_policy=bool(args.hmarl_shared_patch),
         )
 
         if args.eval_table:
@@ -1395,6 +1451,7 @@ if __name__ == "__main__":
                     base_seed=args.eval_seed,
                     deterministic=bool(args.eval_deterministic),
                     enterprise_config_set=args.hmarl_config_set,
+                    shared_patch_policy=bool(args.hmarl_shared_patch),
                 )
                 print("cfg\tn\tmean_return\tsuccess_rate")
                 for cfg in cfgs:
