@@ -119,6 +119,9 @@ class cerere_hmarl_env(AECEnv):
             enterprise_config_keys=enterprise_config_keys,
         )
 
+        # Terminal outcome diagnostics for evaluation
+        self.last_outcome: dict[str, object] = {"defender_win": None, "term_reason": None}
+
         #   manager -> workers -> attacker
         self.attacker_id = "attacker"
 
@@ -216,6 +219,9 @@ class cerere_hmarl_env(AECEnv):
 
     def reset(self, seed=None, options=None):
         self.base_env.reset(seed=seed, options=options)
+
+        # Reset last outcome
+        self.last_outcome = {"defender_win": None, "term_reason": None}
 
         self.agents = self.possible_agents[:]
         self._agent_selector = AgentSelector(self.agents)
@@ -395,6 +401,12 @@ class cerere_hmarl_env(AECEnv):
                         self.base_env.block_traffic,
                     )
 
+                term_reason = None
+                defender_win = False
+                if len(_rest) >= 2:
+                    term_reason = _rest[-2]
+                    defender_win = bool(_rest[-1])
+
                 defender_reward = float(rew)
 
                 # Give team reward to manager + selected worker
@@ -403,6 +415,18 @@ class cerere_hmarl_env(AECEnv):
                     self.rewards[self._selected_worker] = defender_reward
                 # Attacker reward 0
                 self.rewards[self.attacker_id] = 0.0
+
+                # Attach terminal outcome to infos so evaluation doesn't guess
+                if terminated2 == 1:
+                    self.last_outcome = {
+                        "defender_win": bool(defender_win),
+                        "term_reason": term_reason,
+                    }
+                    for aid in self.agents:
+                        if aid not in self.infos:
+                            self.infos[aid] = {}
+                        self.infos[aid]["defender_win"] = bool(defender_win)
+                        self.infos[aid]["term_reason"] = term_reason
 
                 self._pending_defender_transition = False
                 self._last_def_action = None
@@ -605,6 +629,7 @@ class cerere_net_v2_env(AECEnv):
         self.actualAction = -1
         self.data_ex = 0
         self.mystep = 0
+        self.last_outcome: dict[str, object] = {"defender_win": None, "term_reason": None}
 
         #print("Number of nodes is %d" % self.netgraph.number_of_nodes())
         self.possible_agents = ["player_" + str(r) for r in range(2)]
@@ -759,6 +784,7 @@ class cerere_net_v2_env(AECEnv):
         ##### not needed # super().reset(seed=seed)
         self.data_ex = 0
         self.mystep = 0
+        self.last_outcome = {"defender_win": None, "term_reason": None}
         self.critserver = self.init_critserver
         self.optserver = self.init_optserver
         self.block_traffic = 0
@@ -857,9 +883,29 @@ class cerere_net_v2_env(AECEnv):
             # reward function
             #reward, terminated2, reachable_healthy_nodes, reachable_infected_nodes = network.getReward(self.critserver, self.optserver, self.topology, self.nwstate, pFlag, self.netgraph)
             if self.rw_function == 2:
-                reward, terminated2, reachable_healthy_nodes, reachable_infected_nodes, self.data_ex = network.getReward3(self.critserver, self.optserver, self.topology, self.nwstate, pFlag, self.netgraph, action, self.actionSpace, self.block_traffic)
+                reward, terminated2, reachable_healthy_nodes, reachable_infected_nodes, self.data_ex, term_reason, defender_win = network.getReward3(
+                    self.critserver,
+                    self.optserver,
+                    self.topology,
+                    self.nwstate,
+                    pFlag,
+                    self.netgraph,
+                    action,
+                    self.actionSpace,
+                    self.block_traffic,
+                )
             else:
-                reward, terminated2, reachable_healthy_nodes, reachable_infected_nodes, self.data_ex = network.getReward2(self.critserver, self.optserver, self.topology, self.nwstate, pFlag, self.netgraph, action, self.actionSpace, self.block_traffic)
+                reward, terminated2, reachable_healthy_nodes, reachable_infected_nodes, self.data_ex, term_reason, defender_win = network.getReward2(
+                    self.critserver,
+                    self.optserver,
+                    self.topology,
+                    self.nwstate,
+                    pFlag,
+                    self.netgraph,
+                    action,
+                    self.actionSpace,
+                    self.block_traffic,
+                )
             ###--self.actualAction = -2
             ###---self.actualActionType = ATTACK_ACTION
             #print(self.nwstate)
@@ -880,6 +926,17 @@ class cerere_net_v2_env(AECEnv):
                self.truncations = {
                   agent: True for agent in self.agents
             }
+
+               self.last_outcome = {
+                   "defender_win": bool(defender_win),
+                   "term_reason": term_reason,
+               }
+
+               for a in self.agents:
+                   if a not in self.infos:
+                       self.infos[a] = {}
+                   self.infos[a]["defender_win"] = bool(defender_win)
+                   self.infos[a]["term_reason"] = term_reason
 
         self.rewards[self.agent_selection] = reward
         self._accumulate_rewards()

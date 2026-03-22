@@ -281,13 +281,17 @@ def getReward2(critserver, optserver, topology, nwstate, pFlag, netgraph, in_act
     infectedNodes = len(topology) - healthyNodes
     terminate = 0
     reward = 0
+    term_reason = None  # crit_infected, leftover_too_small, patched_server, no_infected_in_subgraph
+    defender_win = False
 
     # Check if Critical Server is infected, return reward = -1 and terminated = 1
     if [1, critserver] in nwstate:
         reward = -1
         terminate = 1
+        term_reason = "crit_infected"
+        defender_win = False
         ##print("Terminate (infected critical server), Reward = %f" % reward)
-        return reward, terminate, reachable_healthy_nodes, reachable_infected_nodes, data_ex
+        return reward, terminate, reachable_healthy_nodes, reachable_infected_nodes, data_ex, term_reason, defender_win
 
 
     # Component of nodes connected to critical server
@@ -304,15 +308,19 @@ def getReward2(critserver, optserver, topology, nwstate, pFlag, netgraph, in_act
     if len(reachable) - reachable_infected_nodes < 0.25 * len(topology):
         reward = -1
         terminate = 1
+        term_reason = "leftover_too_small"
+        defender_win = False
         ##print("Terminate (small leftover topology), Reward = %f" % reward)
-        return reward, terminate, reachable_healthy_nodes, reachable_infected_nodes, data_ex
+        return reward, terminate, reachable_healthy_nodes, reachable_infected_nodes, data_ex, term_reason, defender_win
 
    # set reward, if no infected nodes in subgraph
     if reachable_infected_nodes == 0:
         reward = healthy_nodes_no_infected_subg / len(topology)
         terminate = 1
+        term_reason = "no_infected_in_subgraph"
+        defender_win = True
         _vprint("Terminate (no infected nodes in subgraph), Reward = %f" % reward)
-        return reward, terminate, reachable_healthy_nodes, reachable_infected_nodes, data_ex
+        return reward, terminate, reachable_healthy_nodes, reachable_infected_nodes, data_ex, term_reason, defender_win
 
     if in_action < len(topology):
         # isopatchNode
@@ -321,8 +329,10 @@ def getReward2(critserver, optserver, topology, nwstate, pFlag, netgraph, in_act
         if node_to_patch == critserver or node_to_patch in optserver:
             reward = -1
             terminate = 1
+            term_reason = "patched_server"
+            defender_win = False
             ##print("Terminate (crit/opt server patched), Reward = %f" % reward)
-            return reward, terminate, reachable_healthy_nodes, reachable_infected_nodes, data_ex
+            return reward, terminate, reachable_healthy_nodes, reachable_infected_nodes, data_ex, term_reason, defender_win
         else: 
             reward = ( (healthy_nodes_no_infected_subg / len(topology)) - (reachable_infected_nodes / len(topology)) )/5
             #reward = 0
@@ -337,7 +347,7 @@ def getReward2(critserver, optserver, topology, nwstate, pFlag, netgraph, in_act
         #reward = 1
         #terminate = 1
         ##print("Terminate (block traffic), Reward = %f" % reward)
-        return reward, terminate, reachable_healthy_nodes, reachable_infected_nodes, data_ex
+        return reward, terminate, reachable_healthy_nodes, reachable_infected_nodes, data_ex, term_reason, defender_win
     else:
         # doNothing
         reward = 0
@@ -346,7 +356,7 @@ def getReward2(critserver, optserver, topology, nwstate, pFlag, netgraph, in_act
             exit(1)
     
     #print("Rw steps %d, Reward = %f" % (rw_steps, reward))
-    return reward, terminate, reachable_healthy_nodes, reachable_infected_nodes, data_ex
+    return reward, terminate, reachable_healthy_nodes, reachable_infected_nodes, data_ex, term_reason, defender_win
 
 
 # reward function 3
@@ -359,13 +369,17 @@ def getReward3(critserver, optserver, topology, nwstate, pFlag, netgraph, in_act
     infectedNodes = len(topology) - healthyNodes
     terminate = 0
     reward = 0
+    term_reason = None
+    defender_win = False
 
     # Check if Critical Server is infected, return reward = -1 and terminated = 1
     if [1, critserver] in nwstate:
         reward = -1
         terminate = 1
+        term_reason = "crit_infected"
+        defender_win = False
         _vprint("Terminate (infected critical server), Reward = %f" % reward)
-        return reward, terminate, reachable_healthy_nodes, reachable_infected_nodes, data_ex
+        return reward, terminate, reachable_healthy_nodes, reachable_infected_nodes, data_ex, term_reason, defender_win
 
 
     # Component of nodes connected to critical server
@@ -382,16 +396,20 @@ def getReward3(critserver, optserver, topology, nwstate, pFlag, netgraph, in_act
     if len(reachable) - reachable_infected_nodes < 0.25 * len(topology):
         reward = -1
         terminate = 1
+        term_reason = "leftover_too_small"
+        defender_win = False
         _vprint("Terminate (small leftover topology), Reward = %f" % reward)
-        return reward, terminate, reachable_healthy_nodes, reachable_infected_nodes, data_ex
+        return reward, terminate, reachable_healthy_nodes, reachable_infected_nodes, data_ex, term_reason, defender_win
 
 
    # set reward, if no infected nodes in subgraph
     if reachable_infected_nodes == 0:
         reward = healthy_nodes_no_infected_subg / len(topology)
         terminate = 1
+        term_reason = "no_infected_in_subgraph"
+        defender_win = True
         _vprint("Terminate (no infected nodes in subgraph), Reward = %f" % reward)
-        return reward, terminate, reachable_healthy_nodes, reachable_infected_nodes, data_ex
+        return reward, terminate, reachable_healthy_nodes, reachable_infected_nodes, data_ex, term_reason, defender_win
 
 
     if in_action < len(topology):
@@ -401,8 +419,10 @@ def getReward3(critserver, optserver, topology, nwstate, pFlag, netgraph, in_act
         if node_to_patch == critserver or node_to_patch in optserver:
             reward = -1
             terminate = 1
+            term_reason = "patched_server"
+            defender_win = False
             _vprint("Terminate (crit/opt server patched), Reward = %f" % reward)
-            return reward, terminate, reachable_healthy_nodes, reachable_infected_nodes, data_ex
+            return reward, terminate, reachable_healthy_nodes, reachable_infected_nodes, data_ex, term_reason, defender_win
         else: 
             reward = ( (healthy_nodes_no_infected_subg / len(topology)) - (reachable_infected_nodes / len(topology)) )/5
             #reward = 0
@@ -416,8 +436,10 @@ def getReward3(critserver, optserver, topology, nwstate, pFlag, netgraph, in_act
         #reward = 0
         reward = 1
         terminate = 1
+        term_reason = "block_traffic"
+        defender_win = True
         _vprint("Terminate (block traffic), Reward = %f" % reward)
-        return reward, terminate, reachable_healthy_nodes, reachable_infected_nodes, data_ex
+        return reward, terminate, reachable_healthy_nodes, reachable_infected_nodes, data_ex, term_reason, defender_win
     else:
         # doNothing
         reward = 0
@@ -426,7 +448,7 @@ def getReward3(critserver, optserver, topology, nwstate, pFlag, netgraph, in_act
             exit(1)
     
     _vprint("Rw steps %d, Reward = %f" % (rw_steps, reward))
-    return reward, terminate, reachable_healthy_nodes, reachable_infected_nodes, data_ex
+    return reward, terminate, reachable_healthy_nodes, reachable_infected_nodes, data_ex, term_reason, defender_win
 
 
 

@@ -166,9 +166,29 @@ class CerereNet(gym.Env):
         # reward function
         #reward, terminated2, reachable_healthy_nodes, reachable_infected_nodes = network.getReward(self.critserver, self.optserver, self.topology, self.nwstate, pFlag, self.netgraph)
         if self.rw_function == 2:
-            reward, terminated2, reachable_healthy_nodes, reachable_infected_nodes, self.data_ex = network.getReward3(self.critserver, self.optserver, self.topology, self.nwstate, pFlag, self.netgraph, action, self.actionSpace, self.block_traffic)
+            reward, terminated2, reachable_healthy_nodes, reachable_infected_nodes, self.data_ex, term_reason, defender_win = network.getReward3(
+                self.critserver,
+                self.optserver,
+                self.topology,
+                self.nwstate,
+                pFlag,
+                self.netgraph,
+                action,
+                self.actionSpace,
+                self.block_traffic,
+            )
         else:
-            reward, terminated2, reachable_healthy_nodes, reachable_infected_nodes, self.data_ex = network.getReward2(self.critserver, self.optserver, self.topology, self.nwstate, pFlag, self.netgraph, action, self.actionSpace, self.block_traffic)
+            reward, terminated2, reachable_healthy_nodes, reachable_infected_nodes, self.data_ex, term_reason, defender_win = network.getReward2(
+                self.critserver,
+                self.optserver,
+                self.topology,
+                self.nwstate,
+                pFlag,
+                self.netgraph,
+                action,
+                self.actionSpace,
+                self.block_traffic,
+            )
         self.actualActionType = ATTACK_ACTION
         self.actualAction = -2
         #print(self.nwstate)

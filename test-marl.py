@@ -792,7 +792,8 @@ def eval_model2_forced_configs(
     results = {}
     for cfg in configs:
         rets: list[float] = []
-        succs: list[int] = []
+        wins: list[int] = []
+        reasons: list[str] = []
         for ep in range(n_episodes_per_cfg):
             seed = base_seed + ep
             env.reset(seed=seed, options={"config_key": cfg})
@@ -820,19 +821,32 @@ def eval_model2_forced_configs(
                             )
                 env.step(action)
 
-            crit = getattr(env.unwrapped, "critserver", None)
-            nwstate = getattr(env.unwrapped, "nwstate", None)
-            success = 0 if (crit is not None and nwstate is not None and [1, crit] in nwstate) else 1
+            win = 0
+            reason = "unknown"
+            try:
+                outcome = getattr(env.unwrapped, "last_outcome", None)
+                if isinstance(outcome, dict) and outcome.get("defender_win") is not None:
+                    win = 1 if outcome.get("defender_win") is True else 0
+                    reason = outcome.get("term_reason") or "unknown"
+                else:
+                    info_any = next(iter(env.infos.values())) if env.infos else None
+                    win = 1 if (isinstance(info_any, dict) and info_any.get("defender_win") is True) else 0
+                    reason = (info_any.get("term_reason") if isinstance(info_any, dict) else None) or "unknown"
+            except Exception:
+                pass
+
             ret = float(ep_returns.get("player_1", 0.0))
             rets.append(ret)
-            succs.append(success)
+            wins.append(win)
+            reasons.append(str(reason))
             if verbose:
-                print(f"baseline cfg={cfg} ep={ep} seed={seed} return={ret:.4f} success={success}")
+                print(f"baseline cfg={cfg} ep={ep} seed={seed} return={ret:.4f} win={win} reason={reason}")
 
         results[cfg] = {
             "n": len(rets),
             "mean_return": float(sum(rets) / len(rets)) if rets else float("nan"),
-            "success_rate": float(sum(succs) / len(succs)) if succs else float("nan"),
+            "success_rate": float(sum(wins) / len(wins)) if wins else float("nan"),
+            "term_reason_counts": {r: reasons.count(r) for r in sorted(set(reasons))},
         }
 
     env.close()
@@ -1045,7 +1059,8 @@ def eval_hmarl_manual_forced_configs(
     out = {}
     for cfg in configs:
         rets = []
-        succs = []
+        wins = []
+        reasons = []
 
         for ep in range(n_episodes_per_cfg):
             seed = base_seed + ep
@@ -1062,16 +1077,29 @@ def eval_hmarl_manual_forced_configs(
                     action = pick_action(modules[pid], obs, env.action_space(agent))
                 env.step(action)
 
-            crit = getattr(env.unwrapped.base_env, "critserver", None)
-            nwstate = getattr(env.unwrapped.base_env, "nwstate", None)
-            success = 0 if (crit is not None and nwstate is not None and [1, crit] in nwstate) else 1
+            win = 0
+            reason = "unknown"
+            try:
+                outcome = getattr(env.unwrapped, "last_outcome", None)
+                if isinstance(outcome, dict) and outcome.get("defender_win") is not None:
+                    win = 1 if outcome.get("defender_win") is True else 0
+                    reason = outcome.get("term_reason") or "unknown"
+                else:
+                    info_any = next(iter(env.infos.values())) if env.infos else None
+                    win = 1 if (isinstance(info_any, dict) and info_any.get("defender_win") is True) else 0
+                    reason = (info_any.get("term_reason") if isinstance(info_any, dict) else None) or "unknown"
+            except Exception:
+                pass
+
             rets.append(float(ep_returns.get("manager", 0.0)))
-            succs.append(success)
+            wins.append(win)
+            reasons.append(str(reason))
 
         out[cfg] = {
             "n": len(rets),
             "mean_return": float(sum(rets) / len(rets)) if rets else float("nan"),
-            "success_rate": float(sum(succs) / len(succs)) if succs else float("nan"),
+            "success_rate": float(sum(wins) / len(wins)) if wins else float("nan"),
+            "term_reason_counts": {r: reasons.count(r) for r in sorted(set(reasons))},
         }
 
     env.close()
@@ -1374,9 +1402,35 @@ if __name__ == "__main__":
                     print(
                         f"{cfg}\t{d.get('n')}\t{d.get('mean_return', float('nan')):.4f}\t\t{d.get('success_rate', float('nan')):.3f}"
                     )
+                    trc = d.get("term_reason_counts")
+                    if trc:
+                        print(f"  term_reason_counts: {trc}")
         end = datetime.datetime.now().replace(microsecond=0)
         elapsed = end - start
         print("Stop eval HMARL PPO after %s" % elapsed)
 
+    elif args.eval_table:
+        if SCENARIO == "enterprise":
+            cfgs = [c.strip() for c in args.eval_configs.split(",") if c.strip()]
+            baseline = eval_model2_forced_configs(
+                in_scenario=SCENARIO,
+                path2tar=args.path2tar,
+                in_rwf=args.rwf,
+                configs=cfgs,
+                n_episodes_per_cfg=args.eval_episodes,
+                base_seed=args.eval_seed,
+                verbose=False,
+                deterministic=bool(args.eval_deterministic),
+            )
+            print("\nBaseline evaluation (forced configs)")
+            print("cfg\tn\tmean_return\tsuccess_rate")
+            for cfg in cfgs:
+                d = baseline.get(cfg, {})
+                print(
+                    f"{cfg}\t{d.get('n')}\t{d.get('mean_return', float('nan')):.4f}\t\t{d.get('success_rate', float('nan')):.3f}"
+                )
+                trc = d.get("term_reason_counts")
+                if trc:
+                    print(f"  term_reason_counts: {trc}")
     else:
         print("Do not know what to do in env %s" % ENVIRONMENT)
