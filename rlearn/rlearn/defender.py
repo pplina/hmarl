@@ -9,35 +9,14 @@ def isoNpatchNode(net, netgraph, critserver, optserver, node, nwstate, btraffic)
     
     #print("nwstate 1 %s" % str(nwstate))
     inactiveLinks = 0
+    # 0 -> action considered valid (had some effect)
+    # 1 -> invalid/no-op 
     pFlag = 0
-    # Set pFlag (penaltyFlag) = 4 if infected node patched
-    if [element for element in nwstate if [1, node] in nwstate]:
-        #pFlag = 4
-        # Get neighbourhood
-        adjacency = [
-            element
-            for element in nwstate
-            if len(element) > 2 and (element[1] == node or element[2] == node)
-        ]
-        #print("------> Infected node %s with neighbourhood size %d " % (node, len(adjacency)))
-        # Get nodes connected to to the server
-        reachable = [
-            c
-            for c in sorted(nx.connected_components(netgraph), key=len, reverse=True)
-            if critserver in c
-        ]
-        if node in reachable[0]:
-            shortestpath = nx.shortest_path_length(netgraph, node, critserver)  # Get shortestpath to the Critserver
-            ##print(">>>> Select infected node %s with hops %d to critserver" % (node, shortestpath))
-            pFlag = shortestpath
-        else:
-            # set pFlag = 1 (Action Invalid) if node with no connection to critserver is patched
-            ##print(">>>> Select infected node %s with no connection to critserver" % node)
-            pFlag = -1
 
-    if [0, node] in nwstate:
-        ##print(">>>> Select healty node %s" % node)
-        pFlag = -1
+    # Never allow patching critserver/optserver
+    # Treat as invalid/no-op and do not change state
+    if node == critserver or node in optserver:
+        return nwstate, netgraph, 1, critserver, optserver, btraffic
 
     for value in nwstate:
         index = nwstate.index(value)
@@ -51,9 +30,9 @@ def isoNpatchNode(net, netgraph, critserver, optserver, node, nwstate, btraffic)
             #print("set node state as healthy %s" % node)
             nwstate[index][0] = 0
 
-    # Set pFlag = 1 (Action Invalid) if no links were shutdown
-#a    if inactiveLinks == 0:
-#a        pFlag = 1
+    # Invalid if the node was already isolated
+    if inactiveLinks == 0:
+        pFlag = 1
  
     # Set pFlag = 6 if iso and patch application computer 
 #a    if "ac_" in node: 
@@ -163,10 +142,9 @@ def migrateServer(net, netgraph, critserver, optserver, node, nwstate, btraffic)
         optserver = optserver + [critserver]
         optserver.remove(node)
         critserver = node
-        # Set pFlag = 2 if migrate server 
-        pFlag = 2
+        pFlag = 0
         return nwstate, netgraph, pFlag, critserver, optserver, btraffic
-    # Set pFlag = 1 (Action Invalid) if migrate to infected node
+    # invalid if migrate to infected/non-optserver
     pFlag = 1
     return nwstate, netgraph, pFlag, critserver, optserver, btraffic
 
@@ -174,8 +152,7 @@ def migrateServer(net, netgraph, critserver, optserver, node, nwstate, btraffic)
 # Function that blocks traffic
 def blockTraffic(net, netgraph, critserver, optserver, nwstate, btraffic):
     ##print("Function: Block traffic")
-    # Set pFlag = 1 (Action Invalid) if block traffic
-    pFlag = 1
+    pFlag = 0
     btraffic = 1
     return nwstate, netgraph, pFlag, critserver, optserver, btraffic
 
@@ -183,8 +160,7 @@ def blockTraffic(net, netgraph, critserver, optserver, nwstate, btraffic):
 # Function that does Nothing
 def doNothing(net, netgraph, critserver, optserver, nwstate, btraffic):
     ##print("Function: Do nothing")
-    # Set pFlag = 1 (Action Invalid) if do nothing
-    pFlag = 1
+    pFlag = 0
     return nwstate, netgraph, pFlag, critserver, optserver, btraffic
 
 

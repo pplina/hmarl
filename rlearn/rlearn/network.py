@@ -322,6 +322,11 @@ def getReward2(critserver, optserver, topology, nwstate, pFlag, netgraph, in_act
         _vprint("Terminate (no infected nodes in subgraph), Reward = %f" % reward)
         return reward, terminate, reachable_healthy_nodes, reachable_infected_nodes, data_ex, term_reason, defender_win
 
+    # pFlag == 1 => invalid/no-effect action 
+    invalid_penalty = 0.0
+    if int(pFlag) == 1:
+        invalid_penalty = 0.05
+
     if in_action < len(topology):
         # isopatchNode
         node_to_patch = in_actionSpace[in_action]
@@ -335,9 +340,6 @@ def getReward2(critserver, optserver, topology, nwstate, pFlag, netgraph, in_act
             return reward, terminate, reachable_healthy_nodes, reachable_infected_nodes, data_ex, term_reason, defender_win
         else: 
             reward = ( (healthy_nodes_no_infected_subg / len(topology)) - (reachable_infected_nodes / len(topology)) )/5
-            #reward = 0
-            if pFlag == -1:
-                 reward = 0
     elif in_action >= len(topology) and in_action < len(topology) + 3:
         # migrateServer
         reward = 0
@@ -355,6 +357,7 @@ def getReward2(critserver, optserver, topology, nwstate, pFlag, netgraph, in_act
             _vprint("Exit, action outside action space")
             exit(1)
     
+    reward = float(reward) - float(invalid_penalty)
     #print("Rw steps %d, Reward = %f" % (rw_steps, reward))
     return reward, terminate, reachable_healthy_nodes, reachable_infected_nodes, data_ex, term_reason, defender_win
 
@@ -411,6 +414,9 @@ def getReward3(critserver, optserver, topology, nwstate, pFlag, netgraph, in_act
         _vprint("Terminate (no infected nodes in subgraph), Reward = %f" % reward)
         return reward, terminate, reachable_healthy_nodes, reachable_infected_nodes, data_ex, term_reason, defender_win
 
+    invalid_penalty = 0.0
+    if int(pFlag) == 1:
+        invalid_penalty = 0.05
 
     if in_action < len(topology):
         # isopatchNode
@@ -425,9 +431,6 @@ def getReward3(critserver, optserver, topology, nwstate, pFlag, netgraph, in_act
             return reward, terminate, reachable_healthy_nodes, reachable_infected_nodes, data_ex, term_reason, defender_win
         else: 
             reward = ( (healthy_nodes_no_infected_subg / len(topology)) - (reachable_infected_nodes / len(topology)) )/5
-            #reward = 0
-            if pFlag == -1:
-                 reward = 0
     elif in_action >= len(topology) and in_action < len(topology) + 3:
         # migrateServer
         reward = 0
@@ -447,6 +450,7 @@ def getReward3(critserver, optserver, topology, nwstate, pFlag, netgraph, in_act
             _vprint("Exit, action outside action space")
             exit(1)
     
+    reward = float(reward) - float(invalid_penalty)
     _vprint("Rw steps %d, Reward = %f" % (rw_steps, reward))
     return reward, terminate, reachable_healthy_nodes, reachable_infected_nodes, data_ex, term_reason, defender_win
 
@@ -589,3 +593,10 @@ def reachable_node_list2(critserver, node, netgraph):
            reachable_node_list = []
            #print("Critical server %s with reachable node list %s" % (critserver, str(reachable_node_list)))
     return reachable_node_list
+
+def _compute_reward_core(topology_len: int, all_reachable_nodes: int, reachable_infected_nodes: int, healthy_nodes_no_infected_subg: int) -> float:
+    if topology_len <= 0:
+        return 0.0
+    safe_frac = float(healthy_nodes_no_infected_subg) / float(topology_len)
+    inf_frac = float(reachable_infected_nodes) / float(topology_len)
+    return (safe_frac - inf_frac) / 5.0
