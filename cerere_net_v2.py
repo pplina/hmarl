@@ -300,16 +300,64 @@ class cerere_hmarl_env(AECEnv):
         topo_len = len(self.base_env.topology)
         skill = int(self._selected_skill) if self._selected_skill is not None else 3
 
+        # Convenience state views
+        nwstate = getattr(self.base_env, "nwstate", None)
+        netgraph = getattr(self.base_env, "netgraph", None)
+        critserver = getattr(self.base_env, "critserver", None)
+        optserver = set(getattr(self.base_env, "optserver", []) or [])
+
+        # Compute reachability from critserver in the current active netgraph
+        reachable: set[str] = set()
+        if critserver is not None and netgraph is not None:
+            try:
+                reachable = set(nx.node_connected_component(netgraph, critserver))
+            except Exception:
+                reachable = {critserver}
+
+        infected_nodes: set[str] = set()
+        healthy_nodes: set[str] = set()
+        if isinstance(nwstate, list):
+            for v in nwstate:
+                if isinstance(v, list) and len(v) == 2:
+                    if v[0] == 1:
+                        infected_nodes.add(v[1])
+                    elif v[0] == 0:
+                        healthy_nodes.add(v[1])
+
         if skill == 0:
             # Patch indices are [0 .. topo_len-1]
             allowed_nodes = self._worker_subnet_nodes.get(worker_id, set())
             for i, node in enumerate(self.base_env.actionSpace[:topo_len]):
-                if node in allowed_nodes:
-                    mask[i] = 1.0
+                if node not in allowed_nodes:
+                    continue
+
+                # Never allow patching the critical/optional servers
+                if node == critserver or node in optserver:
+                    continue
+
+                # Only allow patching infected nodes
+                if node not in infected_nodes:
+                    continue
+
+                # Only allow nodes reachable from critserver
+                if reachable and node not in reachable:
+                    continue
+
+                # Only allow patch if node has at least one active link 
+                try:
+                    if netgraph is not None and netgraph.degree(node) <= 0:
+                        continue
+                except Exception:
+                    pass
+
+                mask[i] = 1.0
         elif skill == 1:
             if worker_id == self.worker_mig_id:
                 for i in range(topo_len, min(topo_len + 3, n_actions)):
-                    mask[i] = 1.0
+                    target = self.base_env.actionSpace[i]
+                    # Only allow migration to optservers that are healthy
+                    if target in optserver and target in healthy_nodes:
+                        mask[i] = 1.0
         elif skill == 2:
             idx = topo_len + 3
             if 0 <= idx < n_actions:
