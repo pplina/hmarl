@@ -154,10 +154,14 @@ class cerere_hmarl_env(AECEnv):
             self._action_spaces[wid] = self._worker_action_space
         self._action_spaces[self.attacker_id] = self._attacker_action_space
 
-        # manager obs is a plain Box(flatState)
+        # manager obs is an aggregated feature vector
         # workers obs is Dict({"observations": flatState, "action_mask": mask})
+        self._manager_obs_dim = 4 * 4 + 3
+        manager_box = spaces.Box(
+            0.0, 1.0, shape=(self._manager_obs_dim,), dtype=np.float32
+        )
         base_box = spaces.Box(
-            0, 1, shape=(len(self.base_env.flatState),), dtype=np.float32
+            0.0, 1.0, shape=(len(self.base_env.flatState),), dtype=np.float32
         )
         mask_box = spaces.Box(
             0.0,
@@ -166,7 +170,7 @@ class cerere_hmarl_env(AECEnv):
             dtype=np.float32,
         )
         worker_dict = spaces.Dict({"observations": base_box, "action_mask": mask_box})
-        self._observation_spaces = {self.manager_id: base_box}
+        self._observation_spaces = {self.manager_id: manager_box}
         for wid in self.worker_ids + [self.worker_mig_id]:
             self._observation_spaces[wid] = worker_dict
         self._observation_spaces[self.attacker_id] = base_box
@@ -188,6 +192,100 @@ class cerere_hmarl_env(AECEnv):
             wid: set(self._subnets[i]) for i, wid in enumerate(self.worker_ids)
         }
         self._worker_subnet_nodes[self.worker_mig_id] = set(self.base_env.topology.keys())
+
+    def _compute_manager_obs(self) -> np.ndarray:
+        """Compute aggregated manager observation.
+
+        Output dim: 4 subnets * 4 features + 3 global features = 19
+        All features are normalized to [0, 1]
+        """
+        topo_len = max(1, len(getattr(self.base_env, "topology", {}) or {}))
+        nwstate = getattr(self.base_env, "nwstate", None)
+        netgraph = getattr(self.base_env, "netgraph", None)
+        critserver = getattr(self.base_env, "critserver", None)
+        optserver = getattr(self.base_env, "optserver", []) or []
+        block_traffic = int(getattr(self.base_env, "block_traffic", 0) or 0)
+
+        infected: set[str] = set()
+        healthy: set[str] = set()
+        if isinstance(nwstate, list):
+            for v in nwstate:
+                if isinstance(v, list) and len(v) == 2:
+                    if v[0] == 1:
+                        infected.add(v[1])
+                    elif v[0] == 0:
+                        healthy.add(v[1])
+
+        reachable: set[str] = set()
+        dist: dict[str, int] = {}
+        if critserver is not None and netgraph is not None:
+            try:
+                reachable = set(nx.node_connected_component(netgraph, critserver))
+            except Exception:
+                reachable = {critserver}
+            try:
+                dist = dict(nx.single_source_shortest_path_length(netgraph, critserver))
+            except Exception:
+                dist = {critserver: 0}
+
+        try:
+            (
+                all_reachable_nodes,
+                reachable_healthy_nodes,
+                reachable_infected_nodes,
+                healthy_nodes_no_infected_subg,
+                _data_ex_tmp,
+            ) = network.getNodeStatistic(
+                critserver,
+                optserver,
+                self.base_env.topology,
+                self.base_env.nwstate,
+                self.base_env.netgraph,
+                block_traffic,
+            )
+        except Exception:
+            all_reachable_nodes = len(reachable) if reachable else 0
+            reachable_infected_nodes = len(infected & reachable) if reachable else 0
+            healthy_nodes_no_infected_subg = 0
+
+        max_dist_clip = 8.0
+
+        feats: list[float] = []
+        subnets = list(self._subnets)
+        while len(subnets) < 4:
+            subnets.append([])
+
+        for s in subnets[:4]:
+            sset = set(s)
+            inf_cnt = len(infected & sset)
+            inf_reach_cnt = len(infected & sset & reachable)
+            healthy_reach_cnt = len(healthy & sset & reachable)
+
+            # min distance of infected (reachable) nodes to crit
+            dmin = max_dist_clip
+            candidates = list(infected & sset & reachable)
+            if candidates:
+                dmin = min(float(dist.get(n, max_dist_clip)) for n in candidates)
+                dmin = min(max_dist_clip, max(0.0, dmin))
+
+            feats.append(float(inf_cnt) / float(topo_len))
+            feats.append(float(inf_reach_cnt) / float(topo_len))
+            feats.append(float(dmin) / float(max_dist_clip))
+            feats.append(float(healthy_reach_cnt) / float(topo_len))
+
+        # Global features
+        feats.append(float(reachable_infected_nodes) / float(topo_len))
+        feats.append(float(healthy_nodes_no_infected_subg) / float(topo_len))
+        feats.append(float(all_reachable_nodes) / float(topo_len))
+
+        # Ensure fixed dim
+        if len(feats) != self._manager_obs_dim:
+            if len(feats) < self._manager_obs_dim:
+                feats = feats + [0.0] * (self._manager_obs_dim - len(feats))
+            else:
+                feats = feats[: self._manager_obs_dim]
+
+        return np.array(feats, dtype=np.float32)
 
     @functools.lru_cache(maxsize=None)
     def observation_space(self, agent):
@@ -254,8 +352,9 @@ class cerere_hmarl_env(AECEnv):
 
         # Set observations
         base_obs = np.array(self.base_env.flatState, dtype=np.float32)
+        mgr_obs = self._compute_manager_obs()
         self.observations = {}
-        self.observations[self.manager_id] = base_obs
+        self.observations[self.manager_id] = mgr_obs
         for wid in self.worker_ids + [self.worker_mig_id]:
             self.observations[wid] = {
                 "observations": base_obs,
@@ -266,7 +365,7 @@ class cerere_hmarl_env(AECEnv):
 
     def _sync_obs_from_base(self):
         base_obs = np.array(self.base_env.flatState, dtype=np.float32)
-        self.observations[self.manager_id] = base_obs
+        self.observations[self.manager_id] = self._compute_manager_obs()
         for wid in self.worker_ids + [self.worker_mig_id]:
             self.observations[wid] = {
                 "observations": base_obs,
