@@ -455,6 +455,77 @@ def getReward3(critserver, optserver, topology, nwstate, pFlag, netgraph, in_act
     return reward, terminate, reachable_healthy_nodes, reachable_infected_nodes, data_ex, term_reason, defender_win
 
 
+def getReward4(
+    critserver,
+    optserver,
+    topology,
+    nwstate,
+    pFlag,
+    netgraph,
+    in_action,
+    in_actionSpace,
+    in_block_traffic,
+    a: float = 1.0,
+    b: float = 1.0,
+    c: float = 0.1,
+    win_bonus_scale: float = 1.0,
+):
+    """Dense reward shaping
+
+    Step reward:
+    r = a*(healthy_nodes_no_infected_subg/topo_len) - b*(reachable_infected_nodes/topo_len) - c*(action_invalid)
+
+    Terminal:
+    - attacker wins (crit infected or leftover too small): -1
+    - defender wins (no infected in subgraph):
+        bonus = win_bonus_scale * (healthy_nodes_no_infected_subg/topo_len)
+        reward = bonus
+    """
+    global rw_steps
+    rw_steps = rw_steps + 1
+    terminate = 0
+    term_reason = None
+    defender_win = False
+
+    # Immediate attacker win
+    if [1, critserver] in nwstate:
+        return -1.0, 1, 0, 0, data_ex, "crit_infected", False
+
+    # Component of nodes connected to critical server
+    try:
+        reachable = nx.node_connected_component(netgraph, critserver)
+    except Exception:
+        reachable = {critserver}
+
+    (
+        all_reachable_nodes,
+        reachable_healthy_nodes,
+        reachable_infected_nodes,
+        healthy_nodes_no_infected_subg,
+        data_ex_tmp,
+    ) = getNodeStatistic(critserver, optserver, topology, nwstate, netgraph, in_block_traffic)
+
+    topo_len = max(1, len(topology))
+
+    # Termination: leftover too small
+    if len(reachable) - reachable_infected_nodes < 0.25 * len(topology):
+        return -1.0, 1, reachable_healthy_nodes, reachable_infected_nodes, data_ex, "leftover_too_small", False
+
+    # Defender win
+    if reachable_infected_nodes == 0:
+        bonus = float(win_bonus_scale) * (float(healthy_nodes_no_infected_subg) / float(topo_len))
+        return float(bonus), 1, reachable_healthy_nodes, reachable_infected_nodes, data_ex, "no_infected_in_subgraph", True
+
+    invalid = 1.0 if int(pFlag) == 1 else 0.0
+    step_reward = (
+        float(a) * (float(healthy_nodes_no_infected_subg) / float(topo_len))
+        - float(b) * (float(reachable_infected_nodes) / float(topo_len))
+        - float(c) * invalid
+    )
+
+    return float(step_reward), 0, reachable_healthy_nodes, reachable_infected_nodes, data_ex, None, False
+
+
 
 """
 # reward function

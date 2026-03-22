@@ -177,6 +177,18 @@ class CerereNet(gym.Env):
                 self.actionSpace,
                 self.block_traffic,
             )
+        elif self.rw_function == 4:
+            reward, terminated2, reachable_healthy_nodes, reachable_infected_nodes, self.data_ex, term_reason, defender_win = network.getReward4(
+                self.critserver,
+                self.optserver,
+                self.topology,
+                self.nwstate,
+                pFlag,
+                self.netgraph,
+                action,
+                self.actionSpace,
+                self.block_traffic,
+            )
         else:
             reward, terminated2, reachable_healthy_nodes, reachable_infected_nodes, self.data_ex, term_reason, defender_win = network.getReward2(
                 self.critserver,
