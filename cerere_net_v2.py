@@ -61,10 +61,22 @@ def _make_base_env(render_mode: str | None, rw_func: int | None, scenario: str |
     return cerere_net_v2_env(render_mode=render_mode, rw_func=rw_func, scenario=scenario)
 
 
+def _parse_fixed_config_value(value) -> list[str] | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        s = value.strip()
+        if not s:
+            return None
+        vals = [v.strip() for v in s.split(",") if v.strip()]
+        return vals or None
+    return None
+
+
 # Load enterprise infection configs from JSON.
-def _load_enterprise_config_set(path: str | None) -> dict[str, list[str]]:
+def _load_enterprise_config_set(path: str | None) -> tuple[dict[str, list[str]], list[str] | None]:
     if not path:
-        return {}
+        return {}, None
     p = os.path.abspath(path)
     with open(p, "r", encoding="utf-8") as f:
         data = json.load(f)
@@ -75,7 +87,8 @@ def _load_enterprise_config_set(path: str | None) -> dict[str, list[str]]:
         for k, v in data["configs"].items():
             if isinstance(v, dict) and "infected_nodes" in v:
                 out[str(k)] = list(v["infected_nodes"])
-        return out
+        fixed = _parse_fixed_config_value(data.get("fixed_config"))
+        return out, fixed
 
     # Format B
     if isinstance(data, dict):
@@ -83,7 +96,7 @@ def _load_enterprise_config_set(path: str | None) -> dict[str, list[str]]:
         for k, v in data.items():
             if isinstance(v, list) and all(isinstance(x, str) for x in v):
                 out2[str(k)] = list(v)
-        return out2
+        return out2, None
 
     raise ValueError(f"Unsupported enterprise config-set format in {p}")
 
@@ -676,10 +689,24 @@ class cerere_net_v2_env(AECEnv):
         #print("#### Beginn INIT new topology ###")
         if scenario == 'enterprise':
             # Multiple fixed initial compromise patterns (loaded from file when provided)
-            loaded = _load_enterprise_config_set(enterprise_config_set)
-            if loaded:
-                self.infection_configs = loaded
+            loaded_cfgs, fixed_from_file = _load_enterprise_config_set(enterprise_config_set)
+            if loaded_cfgs:
+                self.infection_configs = loaded_cfgs
                 self.enterprise_config_set_path = os.path.abspath(enterprise_config_set)
+
+                self.config_keys = list(self.infection_configs.keys())
+
+                if fixed_from_file is not None:
+                    # Preserve order as specified in fixed_config
+                    self.config_keys = [k for k in fixed_from_file if k in self.infection_configs]
+
+                    if len(self.config_keys) == 1:
+                        self.enterprise_fixed_config_key = self.config_keys[0]
+                    else:
+                        self.enterprise_fixed_config_key = None
+                else:
+                    self.enterprise_fixed_config_key = None
+
             else:
                 # Fallback to the default patterns (kept for backwards compatibility)
                 self.infection_configs = {
@@ -692,28 +719,27 @@ class cerere_net_v2_env(AECEnv):
                     "C3": ["s3_6", "s3_7", "s3_9"],
                 }
                 self.enterprise_config_set_path = None
-            self.config_keys = list(self.infection_configs.keys())
+                self.config_keys = list(self.infection_configs.keys())
+                self.enterprise_fixed_config_key = enterprise_fixed_config_key
 
-            # Allow restricting/forcing which initial configs can be used
-            if enterprise_config_keys is not None:
-                missing = [k for k in enterprise_config_keys if k not in self.infection_configs]
-                if missing:
-                    raise ValueError(
-                        f"Unknown enterprise_config_keys"
-                    )
-                self.config_keys = list(enterprise_config_keys)
+                # Allow restricting/forcing which initial configs can be used
+                if enterprise_config_keys is not None:
+                    missing = [k for k in enterprise_config_keys if k not in self.infection_configs]
+                    if missing:
+                        raise ValueError(
+                            f"Unknown enterprise_config_keys"
+                        )
+                    self.config_keys = list(enterprise_config_keys)
 
-            if enterprise_fixed_config_key is not None:
-                if enterprise_fixed_config_key not in self.infection_configs:
-                    raise ValueError(
-                        f"Unknown enterprise_fixed_config_key"
-                    )
-                if enterprise_fixed_config_key not in self.config_keys:
-                    raise ValueError(
-                        f"enterprise_fixed_config_key not in enterprise_config_keys"
-                    )
-
-            self.enterprise_fixed_config_key = enterprise_fixed_config_key
+                if enterprise_fixed_config_key is not None:
+                    if enterprise_fixed_config_key not in self.infection_configs:
+                        raise ValueError(
+                            f"Unknown enterprise_fixed_config_key"
+                        )
+                    if enterprise_fixed_config_key not in self.config_keys:
+                        raise ValueError(
+                            f"enterprise_fixed_config_key not in enterprise_config_keys"
+                        )
             #path2topo = "/home/ubuntu/src/rl-test/rlearn/graphs/topo_generic.csv"
             #path2pos = "/home/ubuntu/src/rl-test/rlearn/graphs/pos_generic.csv" 
             path2topo = os.getcwd() + "/rlearn/graphs/topo_generic.csv"

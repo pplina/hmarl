@@ -136,6 +136,35 @@ def _resolve_checkpoint_path(path: str) -> str:
     return path
 
 
+def _parse_fixed_config_value(value) -> list[str] | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        s = value.strip()
+        if not s:
+            return None
+        vals = [v.strip() for v in s.split(",") if v.strip()]
+        return vals or None
+    return None
+
+
+def _enterprise_cfgs_from_config_set(path: str) -> list[str]:
+    p = os.path.abspath(path)
+    with open(p, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    if not isinstance(data, dict) or "configs" not in data or not isinstance(data["configs"], dict):
+        return ["C1", "C2", "C3"]
+
+    all_cfgs = list(data["configs"].keys())
+    fixed = _parse_fixed_config_value(data.get("fixed_config"))
+    if fixed is None:
+        return all_cfgs
+
+    eff = [c for c in fixed if c in data["configs"]]
+    return eff or all_cfgs
+
+
 # Custom logger function 
 def custom_logger_creator(custom_path, custom_str=""):
     logdir = os.path.join(custom_path, custom_str)
@@ -806,9 +835,15 @@ def eval_model2_forced_configs(
     base_seed: int = 42,
     verbose: bool = False,
     deterministic: bool = True,
+    enterprise_config_set: str | None = None,
 ):
 
-    env_kwargs = dict(render_mode=None, rw_func=in_rwf, scenario=in_scenario)
+    env_kwargs = dict(
+        render_mode=None,
+        rw_func=in_rwf,
+        scenario=in_scenario,
+        enterprise_config_set=enterprise_config_set,
+    )
     env = cerere_net_v2.env(**env_kwargs)
 
     if not ray.is_initialized():
@@ -1303,12 +1338,6 @@ if __name__ == "__main__":
                         help='Base seed for evaluation episode resets. Default=42')
     parser.add_argument('--eval_table', help='Prints a per-config (C1/C2/C3) table', action='store_true')
     parser.add_argument(
-        '--eval_configs',
-        type=str,
-        default='C1,C2,C3',
-        help='Comma-separated list of enterprise configs to evaluate when --eval_table is set. Default=C1,C2,C3'
-    )
-    parser.add_argument(
         '--hmarl_config_set',
         '--eval_config_set',
         dest='hmarl_config_set',
@@ -1318,25 +1347,6 @@ if __name__ == "__main__":
             'Path to an enterprise config-set JSON file (C1/C2/C3 definitions). '
             'Used by HMARL evaluation table and HMARL RLlib evaluate() run. '
             'Alias: --eval_config_set. Default=config_sets/enterprise/default.json'
-        ),
-    )
-
-    parser.add_argument(
-        '--train_config',
-        type=str,
-        default='',
-        help=(
-            'Fix a single initial config (disables random reset). '
-            'Example: --train_config C1'
-        ),
-    )
-    parser.add_argument(
-        '--train_configs',
-        type=str,
-        default='',
-        help=(
-            'Restrict to a subset of configs (sampling only within that subset). '
-            'Example: --train_configs C1,C3'
         ),
     )
     parser.add_argument(
@@ -1371,8 +1381,6 @@ if __name__ == "__main__":
     elif args.train:
         print("Train model in env %s, scenario %s" % (ENVIRONMENT, SCENARIO))
         start = datetime.datetime.now().replace(microsecond=0)
-        train_fixed = args.train_config.strip() or None
-        train_subset = [c.strip() for c in args.train_configs.split(',') if c.strip()] or None
         train_model(
             args.iter,
             args.stop_rw,
@@ -1381,8 +1389,8 @@ if __name__ == "__main__":
             args.path2tar,
             args.rwf,
             enterprise_config_set=(args.hmarl_config_set if SCENARIO == "enterprise" else None),
-            enterprise_fixed_config_key=(train_fixed if SCENARIO == "enterprise" else None),
-            enterprise_config_keys=(train_subset if SCENARIO == "enterprise" else None),
+            enterprise_fixed_config_key=None,
+            enterprise_config_keys=None,
         )
         end = datetime.datetime.now().replace(microsecond=0)
         elapsed = end - start
@@ -1405,8 +1413,6 @@ if __name__ == "__main__":
     elif args.train_hmarl:
         print("Train HMARL PPO in scenario %s" % SCENARIO)
         start = datetime.datetime.now().replace(microsecond=0)
-        train_fixed = args.train_config.strip() or None
-        train_subset = [c.strip() for c in args.train_configs.split(',') if c.strip()] or None
         train_hmarl(
             args.iter,
             args.stop_rw,
@@ -1414,8 +1420,8 @@ if __name__ == "__main__":
             args.path2tar,
             args.rwf,
             enterprise_config_set=(args.hmarl_config_set if SCENARIO == "enterprise" else None),
-            enterprise_fixed_config_key=(train_fixed if SCENARIO == "enterprise" else None),
-            enterprise_config_keys=(train_subset if SCENARIO == "enterprise" else None),
+            enterprise_fixed_config_key=None,
+            enterprise_config_keys=None,
             shared_patch_policy=bool(args.hmarl_shared_patch),
         )
         end = datetime.datetime.now().replace(microsecond=0)
@@ -1440,7 +1446,7 @@ if __name__ == "__main__":
             if SCENARIO != "enterprise":
                 print("--eval_table is intended for enterprise only (C1/C2/C3).")
             else:
-                cfgs = [c.strip() for c in args.eval_configs.split(',') if c.strip()]
+                cfgs = _enterprise_cfgs_from_config_set(args.hmarl_config_set)
                 print("\nHMARL evaluation (forced configs)")
                 hm = eval_hmarl_manual_forced_configs(
                     in_scenario=SCENARIO,
@@ -1468,7 +1474,7 @@ if __name__ == "__main__":
 
     elif args.eval_table:
         if SCENARIO == "enterprise":
-            cfgs = [c.strip() for c in args.eval_configs.split(",") if c.strip()]
+            cfgs = _enterprise_cfgs_from_config_set(args.hmarl_config_set)
             baseline = eval_model2_forced_configs(
                 in_scenario=SCENARIO,
                 path2tar=args.path2tar,
@@ -1478,6 +1484,7 @@ if __name__ == "__main__":
                 base_seed=args.eval_seed,
                 verbose=False,
                 deterministic=bool(args.eval_deterministic),
+                enterprise_config_set=args.hmarl_config_set,
             )
             print("\nBaseline evaluation (forced configs)")
             print("cfg\tn\tmean_return\tsuccess_rate")

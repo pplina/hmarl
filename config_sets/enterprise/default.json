@@ -1,6 +1,7 @@
 {
   "name": "default",
   "description": "Original enterprise compromise patterns (C1/C2/C3) that were previously hardcoded in cerere_net_v2_env.",
+  "fixed_config": "C1",
   "configs": {
     "C1": {
       "description": "Compromises concentrated in s1/s2 subnet.",
