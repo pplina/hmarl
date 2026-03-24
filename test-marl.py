@@ -70,13 +70,13 @@ class HeuristicAttackModule(RLModule):
     @override(RLModule)
     def _forward(self, batch, **kwargs):
 
-        print(self)
+        #print(self)
 
         obs_batch_size = len(tree.flatten(batch[SampleBatch.OBS])[0])
-        print(f"Obs Batch {batch[SampleBatch.OBS]}")
+        #print(f"Obs Batch {batch[SampleBatch.OBS]}")
         #print(f"Actions Batch {batch[SampleBatch.ACTIONS]}")
-        print(f"Obs Batch size {obs_batch_size}")
-        print(f"Obs Batch2 {tree.flatten(batch[SampleBatch.OBS])[0]}")
+        #print(f"Obs Batch size {obs_batch_size}")
+        #print(f"Obs Batch2 {tree.flatten(batch[SampleBatch.OBS])[0]}")
 #        print(f"Obs Batch size {obs_batch_size}")
 #        actions = batch_func(
 #            [self.action_space.sample() for _ in range(obs_batch_size)]

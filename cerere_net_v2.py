@@ -993,7 +993,7 @@ class cerere_net_v2_env(AECEnv):
                 if seed is not None:
                     random.seed(seed)
                 self.selected_config_key = random.choice(self.config_keys)
-            print(self.selected_config_key)
+            #print(self.selected_config_key)
             self.topology = self.topologies_by_config[self.selected_config_key]
         self.netgraph = nx.Graph()
         self.netgraph = network.createNetwork(self.net, self.netgraph, self.topology, self.mode)
