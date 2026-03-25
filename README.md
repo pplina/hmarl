@@ -103,10 +103,10 @@ python3 test-marl.py --eval_hmarl --eval_table --eval_deterministic --scen enter
 
 *HMARL training*
 ```
-python3 test-marl.py --train_hmarl --scen enterprise --rwf 4 --iter 300 --stop_rw 999 --path2tar ./exp_hmarl_ppo_heuristic_C1 --hmarl_shared_patch
+python3 test-marl.py --train_hmarl --scen enterprise --rwf 4 --iter 2000 --stop_rw 999 --path2tar ./exp_hmarl_ppo_heuristic_C1_2k --hmarl_shared_patch
 ```
 
 *HMARL evaluation*
 ```
-python3 test-marl.py --eval_hmarl --scen enterprise --rwf 4 --path2tar ./exp_hmarl_ppo_heuristic_C1 --eval_table --eval_episodes 100 --eval_seed 1 --hmarl_shared_patch
+python3 test-marl.py --eval_hmarl --scen enterprise --rwf 4 --path2tar ./exp_hmarl_ppo_heuristic_C1_2k --eval_table --eval_episodes 100 --eval_seed 1 --hmarl_shared_patch
 ```
