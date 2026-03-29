@@ -187,6 +187,7 @@ def train_model(
     enterprise_config_set: str | None = None,
     enterprise_fixed_config_key: str | None = None,
     enterprise_config_keys: list[str] | None = None,
+    min_iters: int = 0,
 ):
 
     print(f"Starting training on {str(path2tar)}.")
@@ -241,14 +242,14 @@ def train_model(
 #            },
          )
         .env_runners(
-#           env_to_module_connector=lambda env: (
-                # `agent_ids=...`: Only flatten obs for the learning RLModule.
-#                FlattenObservations(multi_agent=True, agent_ids={"player_1"}),
-#            ),
             num_env_runners=12,
             num_envs_per_env_runner=1,
             num_cpus_per_env_runner=1,
         )
+#           env_to_module_connector=lambda env: (
+                # `agent_ids=...`: Only flatten obs for the learning RLModule.
+#                FlattenObservations(multi_agent=True, agent_ids={"player_1"}),
+#            ),
         .multi_agent(
             policies={"p0", "p1"},
             # `player_0` uses `p0`, `player_1` uses `p1`.
@@ -282,9 +283,9 @@ def train_model(
        print(f"Iter: {i}, Reward min: {result[ENV_RUNNER_RESULTS][EPISODE_RETURN_MIN]}")
        print(f"Iter {i}, Num steps: {result[NUM_ENV_STEPS_SAMPLED_LIFETIME]}")
        #exit()
-       #if result[ENV_RUNNER_RESULTS][EPISODE_RETURN_MEAN] >= stop_rw: ##0.64 ent, 0.83 mil
-       if result['env_runners']['module_episode_returns_mean']['p1'] >= stop_rw: ##0.64 ent, 0.83 mil
-           print(f"Reached episode return of {stop_rw} -> stopping ")
+       # Early stopping only after min_iters
+       if (i + 1) >= int(min_iters) and result['env_runners']['module_episode_returns_mean']['p1'] >= stop_rw:
+           print(f"Reached episode return of {stop_rw} at iter {i} (min_iters={min_iters}) -> stopping")
            print("####################### Results Train Beginn #########################")
            print(result)
            print("####################### Results Train End    #########################")
@@ -311,6 +312,7 @@ def train_hmarl(
     enterprise_fixed_config_key: str | None = None,
     enterprise_config_keys: list[str] | None = None,
     shared_patch_policy: bool = False,
+    min_iters: int = 0,
 ):
 
     env_kwargs = dict(
@@ -418,8 +420,12 @@ def train_hmarl(
         result = algo.train()
         last_mean = result[ENV_RUNNER_RESULTS][EPISODE_RETURN_MEAN]
         print(f"Iter: {i}, Reward mean: {last_mean}")
-        if last_mean >= stop_rw:
-            print(f"Reached episode return of {stop_rw} -> stopping")
+        if last_mean >= stop_rw and (i + 1) < int(min_iters):
+            print(
+                f"Reached stop_rw={stop_rw} at iter={i}, but min_iters={min_iters} not reached yet; continuing."
+            )
+        if (i + 1) >= int(min_iters) and last_mean >= stop_rw:
+            print(f"Reached episode return of {stop_rw} at iter {i} (min_iters={min_iters}) -> stopping")
             break
 
     checkpoint_path = algo.save(os.path.abspath(path2tar))
@@ -682,11 +688,12 @@ def eval_model(in_render_mode, in_scenario, path2tar, in_rwf):
             num_env_runners=12,
             num_envs_per_env_runner=1,
             num_cpus_per_env_runner=1,
+        )
 #            env_to_module_connector=lambda env: (
 #                # `agent_ids=...`: Only flatten obs for the learning RLModule.
 #                FlattenObservations(multi_agent=True, agent_ids={"player_0"}),
 #            ),
-        )
+    
         .multi_agent(
             policies={"p0", "p1"},
             # `player_0` uses `p0`, `player_1` uses `p1`.
@@ -1366,6 +1373,12 @@ if __name__ == "__main__":
                         help='Number of trainings iterations (ent=100000/mil=100000) , default = 50000')
     parser.add_argument('--stop_rw', type=float, default=0.1,
                         help='Mean reward to stop the training (ent=0.64 ent/ mil=0.83 mil), default = 0.1')
+    parser.add_argument(
+        '--min_iters',
+        type=int,
+        default=0,
+        help='Minimum number of training iterations before stop_rw early-stopping is allowed. Default=0',
+    )                    
     parser.add_argument('--rwf', type=int, default=1,
                         help='Used reward function (iso-patch=1/bt=2) , default = 1')   
     parser.add_argument('--eval_episodes', type=int, default=1,
@@ -1427,6 +1440,7 @@ if __name__ == "__main__":
             enterprise_config_set=(args.hmarl_config_set if SCENARIO == "enterprise" else None),
             enterprise_fixed_config_key=None,
             enterprise_config_keys=None,
+            min_iters=args.min_iters,
         )
         end = datetime.datetime.now().replace(microsecond=0)
         elapsed = end - start
@@ -1469,6 +1483,7 @@ if __name__ == "__main__":
             enterprise_fixed_config_key=None,
             enterprise_config_keys=None,
             shared_patch_policy=bool(args.hmarl_shared_patch),
+            min_iters=args.min_iters,
         )
         end = datetime.datetime.now().replace(microsecond=0)
         elapsed = end - start
