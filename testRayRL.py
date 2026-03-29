@@ -98,7 +98,7 @@ def test(n_episodes, env_name, scenario_name, rwf):
         env.close()
 
     if env_name == "NewCerere":
-        env = gymnasium.make('gym_examples/CERERE-v0', render_mode="human", scenario=scenario_name)
+        env = gymnasium.make('gym_examples/CERERE-v0', render_mode=None, scenario=scenario_name)
         obs, info = env.reset()
 
         for step in range(n_episodes):
@@ -114,7 +114,7 @@ def test(n_episodes, env_name, scenario_name, rwf):
 ###### Eval Begin
 def eval_model(env_name, scenario_name, path2tar, rwf):
     if env_name == "MountainCar":
-        env = gymnasium.make('MountainCar-v0', render_mode="human")
+        env = gymnasium.make('MountainCar-v0', render_mode=None)
         
         # Initialize Ray if not already done
         if not ray.is_initialized():
@@ -140,7 +140,7 @@ def eval_model(env_name, scenario_name, path2tar, rwf):
         env.close()
 
     if env_name == "NewCerere":
-        env = gymnasium.make('gym_examples/CERERE-v0', render_mode="human", rw_func=rwf, scenario=scenario_name)
+        env = gymnasium.make('gym_examples/CERERE-v0', render_mode=None, rw_func=rwf, scenario=scenario_name)
         
         # Initialize Ray if not already done
         if not ray.is_initialized():
@@ -235,7 +235,7 @@ def train_model(iterations, stop_rw, env_name, scenario_name, path2tar, rwf):
             "framework": "torch",
             "num_gpus": int(torch.cuda.is_available()),
             "seed": 100,
-            "num_cpus": 6,
+            "num_cpus": 16,
             "num_workers": 1,
             "train_batch_size": 64,
             "model": {
@@ -341,7 +341,9 @@ def train_model(iterations, stop_rw, env_name, scenario_name, path2tar, rwf):
                    },
                 )
                 .env_runners(
-                    num_env_runners=0
+                    num_env_runners=12,
+                    num_envs_per_env_runner=1,
+                    num_cpus_per_env_runner=1,
                 )
                 # old api stack
 #                .api_stack(enable_rl_module_and_learner=False, enable_env_runner_and_connector_v2=False)
@@ -381,7 +383,9 @@ def train_model(iterations, stop_rw, env_name, scenario_name, path2tar, rwf):
                    },
                 )
                 .env_runners(
-                    num_env_runners=0
+                    num_env_runners=12,
+                    num_envs_per_env_runner=1,
+                    num_cpus_per_env_runner=1,
                 )
                 .debugging(log_level="ERROR", logger_creator=custom_logger_creator(tmp_path, "ppo_cerere"))
                 .framework(framework="torch")
@@ -458,7 +462,7 @@ def train_model_with_tune(iterations, stop_rw, env_name, scenario_name, path2tar
        if not ray.is_initialized():
            ray.init(
                num_gpus=int(torch.cuda.is_available()),           
-               num_cpus=6,
+               num_cpus=16,
                include_dashboard=False,
                ignore_reinit_error=True,
                log_to_driver=False,
@@ -493,6 +497,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--test', help="Test random action values in the spezified env", action="store_true")
     parser.add_argument('--eval', help="Eval a trained model in the specified env", action="store_true")
+    parser.add_argument('--eval_table', help="Eval a trained model and print mean_return + success_rate (Cerere only)", action="store_true")
     parser.add_argument('--train', help="Train model in the specified env", action="store_true")
     parser.add_argument('--trainWithTune', help="Train with ray tune model in the specified env", action="store_true")
     parser.add_argument('--iter', type=int, default=50000,
@@ -507,6 +512,10 @@ if __name__ == "__main__":
                         help='Environment: [MountainCar, NewCerere] , default = NewCerere')
     parser.add_argument('--scen', type=str, default='none',
                         help='Scenario: [enterprise , military, none] , default = none')
+    parser.add_argument('--eval_episodes', type=int, default=100,
+                        help='Number of episodes for --eval_table, default=100')
+    parser.add_argument('--eval_seed', type=int, default=1,
+                        help='Random seed for --eval_table, default=1')
     args = parser.parse_args()
     ENVIRONMENT = args.env
     SCENARIO = args.scen
@@ -533,6 +542,112 @@ if __name__ == "__main__":
         end = datetime.datetime.now().replace(microsecond=0)
         elapsed = end - start
         print("Stop eval model in env %s after %s" % (ENVIRONMENT, elapsed))
+    elif args.eval_table:
+        if ENVIRONMENT != "NewCerere":
+            print("--eval_table is only supported for env=NewCerere")
+            exit(1)
+
+        # Determinism / reproducibility
+        random.seed(args.eval_seed)
+        np.random.seed(args.eval_seed)
+        torch.manual_seed(args.eval_seed)
+
+        # Build an evaluation-only algo instance and restore checkpoint
+        if not ray.is_initialized():
+            ray.init(ignore_reinit_error=True)
+
+        env = gymnasium.make('gym_examples/CERERE-v0', render_mode=None, rw_func=rwf, scenario=SCENARIO)
+        register_env("CERERE-v0", lambda config: env)
+
+        # We use PPO if path contains 'ppo', otherwise DQN (same heuristic as the rest of the file)
+        # NOTE: `testRayRL.py --train` currently builds algorithms on RLlib's *new API stack*.
+        # Therefore, for evaluation we must also use the new API stack and compute deterministic
+        # actions via the underlying RLModule (not via `compute_single_action`).
+        is_ppo = "ppo" in path2tar.lower()
+        if is_ppo:
+            config_eval = (
+                PPOConfig()
+                .environment(env="CERERE-v0")
+                .training(
+                    model={
+                        "fcnet_hiddens": [256, 256],
+                        "fcnet_activation": "relu",
+                        "vf_share_layers": True,
+                    },
+                )
+                .env_runners(
+                    num_env_runners=12,
+                    num_envs_per_env_runner=1,
+                    num_cpus_per_env_runner=1,
+                )
+                .framework(framework="torch")
+            )
+            algo = config_eval.build()
+        else:
+            config_eval = (
+                DQNConfig()
+                .environment(env="CERERE-v0")
+                .training(
+                    model={
+                        "fcnet_hiddens": [256, 256],
+                        "fcnet_activation": "relu",
+                        "vf_share_layers": True,
+                    },
+                )
+                .env_runners(
+                    num_env_runners=12,
+                    num_envs_per_env_runner=1,
+                    num_cpus_per_env_runner=1,
+                )
+                .framework(framework="torch")
+            )
+            algo = config_eval.build()
+
+        algo.restore(os.path.abspath(path2tar))
+        module = algo.get_module()
+
+        # Run episodes manually so we can compute success_rate and term_reason_counts
+        episode_returns = []
+        successes = 0
+        term_reason_counts = {}
+
+        for ep in range(args.eval_episodes):
+            obs, info = env.reset(seed=args.eval_seed + ep)
+            terminated = False
+            truncated = False
+            ep_return = 0.0
+
+            while not (terminated or truncated):
+                # Deterministic action using RLModule forward_inference
+                obs_t = torch.tensor(obs, dtype=torch.float32).unsqueeze(0)
+                out = module.forward_inference({"obs": obs_t})
+                if is_ppo:
+                    # PPO returns action distribution inputs (logits)
+                    logits = out["action_dist_inputs"]
+                    action = int(torch.argmax(logits, dim=-1).item())
+                else:
+                    # DQN returns actions directly
+                    action = int(out["actions"][0].item())
+                obs, reward, terminated, truncated, info = env.step(action)
+                ep_return += float(reward)
+
+            episode_returns.append(ep_return)
+            if isinstance(info, dict) and info.get("defender_win") is True:
+                successes += 1
+            tr = None
+            if isinstance(info, dict):
+                tr = info.get("term_reason")
+            if tr is None:
+                tr = "unknown"
+            term_reason_counts[tr] = term_reason_counts.get(tr, 0) + 1
+
+        mean_return = float(np.mean(episode_returns)) if episode_returns else 0.0
+        success_rate = successes / max(1, args.eval_episodes)
+
+        print("cfg\t n\t mean_return\t success_rate")
+        print(f"{SCENARIO}\t {args.eval_episodes}\t {mean_return:.4f}\t {success_rate:.3f}")
+        print(f"  term_reason_counts: {term_reason_counts}")
+        env.close()
     elif args.train:
         print("Train model in env %s, scenario %s" % (ENVIRONMENT, SCENARIO))
         start = datetime.datetime.now().replace(microsecond=0)

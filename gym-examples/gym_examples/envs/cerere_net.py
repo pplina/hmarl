@@ -41,12 +41,14 @@ DEFENSE_ACTION = 2
 class CerereNet(gym.Env):
     #metadata = {'render_modes': ['human', 'rgb_array'], "render_fps": 4}
     metadata = {'render_modes': ['human', 'rgb_array']}
-
+    counter = 1
     def __init__(self, render_mode=None, rw_func=1, scenario='enterprise'):
 #    def __init__(self, render_mode: Optional[str] = None, rw_func: Optional[int] = 1, scenario: Optional[str] = 'military'):
         #print("#### Beginn INIT new topology ###")
         if scenario == 'enterprise':
-            infected_nodes = ["s3_10", "s1_7", "s2_9"]
+            #infected_nodes = ["s3_10", "s1_7", "s2_9"]
+            #infected_nodes = ["s1_7", "s1_5", "s2_9"]
+            infected_nodes=["s3_6", "s3_7", "s3_9"]
             #path2topo = "/home/ubuntu/src/rl-test/rlearn/graphs/topo_generic.csv"
             #path2pos = "/home/ubuntu/src/rl-test/rlearn/graphs/pos_generic.csv" 
             path2topo = os.getcwd() + "/rlearn/graphs/topo_generic.csv"
@@ -102,6 +104,10 @@ class CerereNet(gym.Env):
         self.data_ex = 0
         self.mystep = 0
 
+        # Track terminal outcome (for eval-table style aggregation)
+        self.last_term_reason = None
+        self.last_defender_win = None
+
 
     def observe(self):
         return self.observation_state
@@ -120,7 +126,7 @@ class CerereNet(gym.Env):
 
     def _init(self):
         # Attack once in Order to achieve Initial Configuration of the Paper used
-        self.nwstate = attacker.attack(self.net, self.netgraph, self.nwstate, self.critserver, 1, self.mode, self.attackmode)
+        #self.nwstate = attacker.attack(self.net, self.netgraph, self.nwstate, self.critserver, 1, self.mode, self.attackmode)
         self.flatState = network.getVectorFromState2(self.nwstate, self.critserver, self.netgraph)
         all_reachable_nodes, reachable_healthy_nodes, reachable_infected_nodes, healthy_nodes_no_infected_subg, self.data_ex = network.getNodeStatistic(self.critserver, self.optserver, self.topology, self.nwstate, self.netgraph, self.block_traffic)
         # print(self.state)
@@ -135,6 +141,8 @@ class CerereNet(gym.Env):
         super().reset(seed=seed)
         self.data_ex = 0
         self.mystep = 0
+        self.last_term_reason = None
+        self.last_defender_win = None
         self.critserver = self.init_critserver
         self.optserver = self.init_optserver
         self.block_traffic = 0
@@ -215,6 +223,15 @@ class CerereNet(gym.Env):
         info = self._get_info()
         if terminated2 == 1:
             terminated = True
+
+        # Add explicit terminal outcome so evaluation can compute success_rate etc.
+        # Note: We only expose these keys when episode terminates, to match RLlib env style.
+        if terminated:
+            self.last_term_reason = term_reason
+            self.last_defender_win = bool(defender_win)
+            info = dict(info)
+            info["term_reason"] = term_reason
+            info["defender_win"] = bool(defender_win)
         #print("#### End STEP in openAI gym ###")
         return observation, reward, terminated, truncated, info
 
@@ -254,8 +271,10 @@ class CerereNet(gym.Env):
         nx.draw(self.netgraph, pos=self.pos, node_color=color_map, font_size=14, font_weight="bold", with_labels=True)
         plt.axis('off')
         plt.draw()
-        #path = "/home/ubuntu/"+str(self.step)+".png"
-        #plt.savefig(path)
+        path = "/home/ubuntu/hmarl/pictures/rayrl"+str("pic"+str(self.counter))+".png"
+        self.counter += 1
+        print("saved to", path)
+        plt.savefig(path)
         plt.pause(4.5)
         plt.clf()
 

@@ -19,7 +19,6 @@ filelock==3.24.3
 fonttools==4.61.1
 fsspec==2026.2.0
 grpcio==1.78.1
--e git+https://gitlab.informatik.uni-bonn.de/taurisch/rl-test@01801bc5454fd480c4f7eabb46c7deb397e491a9#egg=gym_examples&subdirectory=gym-examples
 idna==3.11
 Jinja2==3.1.6
 jsonschema==4.26.0
