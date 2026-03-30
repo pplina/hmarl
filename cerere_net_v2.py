@@ -135,7 +135,7 @@ class cerere_hmarl_env(AECEnv):
         # Terminal outcome diagnostics for evaluation
         self.last_outcome: dict[str, object] = {"defender_win": None, "term_reason": None}
 
-        #   manager -> workers -> attacker
+        # attacker -> manager -> workers
         self.attacker_id = "attacker"
 
         # HMARL agents
@@ -143,7 +143,7 @@ class cerere_hmarl_env(AECEnv):
         self.worker_ids = [f"worker_{i}" for i in range(4)]
         self.worker_mig_id = "worker_mig"
         self.possible_agents = (
-            [self.manager_id] + self.worker_ids + [self.worker_mig_id] + [self.attacker_id]
+            [self.attacker_id] + [self.manager_id] + self.worker_ids + [self.worker_mig_id]
         )
         self.agents = []
 
@@ -496,7 +496,32 @@ class cerere_hmarl_env(AECEnv):
         # Default: no rewards unless we trigger a real transition
         self._clear_rewards()
 
-        if agent == self.manager_id:
+        if agent == self.attacker_id:
+            # Attacker acts first
+            self.base_env.actualActionType = ATTACK_ACTION
+            self.base_env.actualAction = int(action)
+            self.base_env.nwstate = attacker.attack(
+                self.base_env.net,
+                self.base_env.netgraph,
+                self.base_env.nwstate,
+                self.base_env.critserver,
+                int(action),
+                self.base_env.mode,
+                self.base_env.attackmode,
+            )
+
+            # Update observation vector after attack
+            self.base_env.flatState = network.getVectorFromState2(
+                self.base_env.nwstate, self.base_env.critserver, self.base_env.netgraph
+            )
+
+            self._selected_worker = None
+            self._selected_skill = None
+
+            self._sync_obs_from_base()
+            self.rewards[agent] = 0.0
+
+        elif agent == self.manager_id:
             skill, worker = self._manager_action_meanings[int(action)]
             self._selected_skill = int(skill)
             self._selected_worker = worker
@@ -506,107 +531,6 @@ class cerere_hmarl_env(AECEnv):
 
             # No environment dynamics on manager step.
             self.rewards[agent] = 0.0
-
-        elif agent == self.attacker_id:
-            # Apply attack after a defender action has been applied
-            if not self._pending_defender_transition:
-                # If attacker is called too early (e.g., first after reset), ignore
-                self.rewards[agent] = 0.0
-            else:
-                # Execute attacker action 
-                self.base_env.actualActionType = ATTACK_ACTION
-                self.base_env.actualAction = int(action)
-                self.base_env.nwstate = attacker.attack(
-                    self.base_env.net,
-                    self.base_env.netgraph,
-                    self.base_env.nwstate,
-                    self.base_env.critserver,
-                    int(action),
-                    self.base_env.mode,
-                    self.base_env.attackmode,
-                )
-                # Update observation vector after attack
-                self.base_env.flatState = network.getVectorFromState2(
-                    self.base_env.nwstate, self.base_env.critserver, self.base_env.netgraph
-                )
-
-                # Compute reward after both defender and attacker acted
-                last_def_action = self._last_def_action
-                if last_def_action is None:
-                    last_def_action = len(self.base_env.actionSpace) - 1
-
-                pFlag = int(self._last_def_pflag)
-                if self.base_env.rw_function == 4:
-                    rew, terminated2, *_rest = network.getReward4(
-                        self.base_env.critserver,
-                        self.base_env.optserver,
-                        self.base_env.topology,
-                        self.base_env.nwstate,
-                        pFlag,
-                        self.base_env.netgraph,
-                        int(last_def_action),
-                        self.base_env.actionSpace,
-                        self.base_env.block_traffic,
-                    )
-                elif self.base_env.rw_function == 2:
-                    rew, terminated2, *_rest = network.getReward3(
-                        self.base_env.critserver,
-                        self.base_env.optserver,
-                        self.base_env.topology,
-                        self.base_env.nwstate,
-                        pFlag,
-                        self.base_env.netgraph,
-                        int(last_def_action),
-                        self.base_env.actionSpace,
-                        self.base_env.block_traffic,
-                    )
-                else:
-                    rew, terminated2, *_rest = network.getReward2(
-                        self.base_env.critserver,
-                        self.base_env.optserver,
-                        self.base_env.topology,
-                        self.base_env.nwstate,
-                        pFlag,
-                        self.base_env.netgraph,
-                        int(last_def_action),
-                        self.base_env.actionSpace,
-                        self.base_env.block_traffic,
-                    )
-
-                term_reason = None
-                defender_win = False
-                if len(_rest) >= 2:
-                    term_reason = _rest[-2]
-                    defender_win = bool(_rest[-1])
-
-                defender_reward = float(rew)
-
-                # Give team reward to manager + selected worker
-                if self._selected_worker is not None:
-                    self.rewards[self.manager_id] = defender_reward
-                    self.rewards[self._selected_worker] = defender_reward
-                # Attacker reward 0
-                self.rewards[self.attacker_id] = 0.0
-
-                # Attach terminal outcome to infos so evaluation doesn't guess
-                if terminated2 == 1:
-                    self.last_outcome = {
-                        "defender_win": bool(defender_win),
-                        "term_reason": term_reason,
-                    }
-                    for aid in self.agents:
-                        if aid not in self.infos:
-                            self.infos[aid] = {}
-                        self.infos[aid]["defender_win"] = bool(defender_win)
-                        self.infos[aid]["term_reason"] = term_reason
-
-                self._pending_defender_transition = False
-                self._last_def_action = None
-                self._last_def_pflag = 0
-                self._sync_obs_from_base()
-
-                if terminated2 == 1:
-                    self.truncations = {aid: True for aid in self.agents}
 
         else:
             # Worker steps
@@ -621,7 +545,6 @@ class cerere_hmarl_env(AECEnv):
                 if int(action) < 0 or int(action) >= len(mask) or mask[int(action)] < 0.5:
                     action = self._worker_action_space.n - 1
 
-                # Apply defender action directly to base state (without running attacker here)
                 self.base_env.actualActionType = DEFENSE_ACTION
                 self.base_env.actualAction = int(action)
                 self.base_env.nwstate, self.base_env.netgraph, pFlag, self.base_env.critserver, self.base_env.optserver, self.base_env.block_traffic = defender.getAction(
@@ -643,9 +566,71 @@ class cerere_hmarl_env(AECEnv):
                 self._last_def_pflag = int(pFlag)
                 self.base_env.mystep = getattr(self.base_env, "mystep", 0) + 1
 
-                self._pending_defender_transition = True
+                # Compute reward after defense
+                if self.base_env.rw_function == 4:
+                    rew, terminated2, *_rest = network.getReward4(
+                        self.base_env.critserver,
+                        self.base_env.optserver,
+                        self.base_env.topology,
+                        self.base_env.nwstate,
+                        int(pFlag),
+                        self.base_env.netgraph,
+                        int(action),
+                        self.base_env.actionSpace,
+                        self.base_env.block_traffic,
+                    )
+                elif self.base_env.rw_function == 2:
+                    rew, terminated2, *_rest = network.getReward3(
+                        self.base_env.critserver,
+                        self.base_env.optserver,
+                        self.base_env.topology,
+                        self.base_env.nwstate,
+                        int(pFlag),
+                        self.base_env.netgraph,
+                        int(action),
+                        self.base_env.actionSpace,
+                        self.base_env.block_traffic,
+                    )
+                else:
+                    rew, terminated2, *_rest = network.getReward2(
+                        self.base_env.critserver,
+                        self.base_env.optserver,
+                        self.base_env.topology,
+                        self.base_env.nwstate,
+                        int(pFlag),
+                        self.base_env.netgraph,
+                        int(action),
+                        self.base_env.actionSpace,
+                        self.base_env.block_traffic,
+                    )
+
+                term_reason = None
+                defender_win = False
+                if len(_rest) >= 2:
+                    term_reason = _rest[-2]
+                    defender_win = bool(_rest[-1])
+
+                defender_reward = float(rew)
+
+                self.rewards[self.manager_id] = defender_reward
+                self.rewards[agent] = defender_reward
+                self.rewards[self.attacker_id] = 0.0
+
+                # Attach terminal outcome to infos so evaluation doesn't guess
+                if terminated2 == 1:
+                    self.last_outcome = {
+                        "defender_win": bool(defender_win),
+                        "term_reason": term_reason,
+                    }
+                    for aid in self.agents:
+                        if aid not in self.infos:
+                            self.infos[aid] = {}
+                        self.infos[aid]["defender_win"] = bool(defender_win)
+                        self.infos[aid]["term_reason"] = term_reason
+
+                    self.truncations = {aid: True for aid in self.agents}
+
                 self._sync_obs_from_base()
-                self.rewards[agent] = 0.0
 
         self._accumulate_rewards()
         self.agent_selection = self._agent_selector.next()
