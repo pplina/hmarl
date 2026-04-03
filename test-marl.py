@@ -70,13 +70,13 @@ class HeuristicAttackModule(RLModule):
     @override(RLModule)
     def _forward(self, batch, **kwargs):
 
-        print(self)
+        #print(self)
 
         obs_batch_size = len(tree.flatten(batch[SampleBatch.OBS])[0])
-        print(f"Obs Batch {batch[SampleBatch.OBS]}")
+        #print(f"Obs Batch {batch[SampleBatch.OBS]}")
         #print(f"Actions Batch {batch[SampleBatch.ACTIONS]}")
-        print(f"Obs Batch size {obs_batch_size}")
-        print(f"Obs Batch2 {tree.flatten(batch[SampleBatch.OBS])[0]}")
+        #print(f"Obs Batch size {obs_batch_size}")
+        #print(f"Obs Batch2 {tree.flatten(batch[SampleBatch.OBS])[0]}")
 #        print(f"Obs Batch size {obs_batch_size}")
 #        actions = batch_func(
 #            [self.action_space.sample() for _ in range(obs_batch_size)]
@@ -204,7 +204,10 @@ def train_model(
     env_kwargs = dict(
         render_mode=None,
         rw_func=rwf,
-        scenario=scenario_name
+        scenario=scenario_name,
+        enterprise_config_set=enterprise_config_set,
+        enterprise_fixed_config_key=enterprise_fixed_config_key,
+        enterprise_config_keys=enterprise_config_keys,
     )
 
     register_env(
@@ -242,7 +245,9 @@ def train_model(
                 # `agent_ids=...`: Only flatten obs for the learning RLModule.
 #                FlattenObservations(multi_agent=True, agent_ids={"player_1"}),
 #            ),
-           num_env_runners=0
+            num_env_runners=12,
+            num_envs_per_env_runner=1,
+            num_cpus_per_env_runner=1,
         )
         .multi_agent(
             policies={"p0", "p1"},
@@ -371,7 +376,11 @@ def train_hmarl(
             vf_loss_coeff=0.25,
             kl_coeff=0.005,
         )
-        .env_runners(num_env_runners=0)
+        .env_runners(
+            num_env_runners=12,
+            num_envs_per_env_runner=1,
+            num_cpus_per_env_runner=1,
+        )
         .multi_agent(
             policies=policies,
             policy_mapping_fn=policy_mapping_fn,
@@ -479,7 +488,11 @@ def eval_hmarl(
     eval_config = (
         PPOConfig()
         .environment("pettingzoo_cerere_hmarl")
-        .env_runners(num_env_runners=0)
+        .env_runners(
+            num_env_runners=12,
+            num_envs_per_env_runner=1,
+            num_cpus_per_env_runner=1,
+        )
         .multi_agent(
             policies=policies,
             policy_mapping_fn=policy_mapping_fn,
@@ -528,9 +541,26 @@ def eval_hmarl(
 
 
 ###### Train with Tune Begin
-def train_model_with_tune(iterations, stop_rw, env_name, scenario_name, path2tar, rwf):
+def train_model_with_tune(
+    iterations,
+    stop_rw,
+    env_name,
+    scenario_name,
+    path2tar,
+    rwf,
+    enterprise_config_set: str | None = None,
+    enterprise_fixed_config_key: str | None = None,
+    enterprise_config_keys: list[str] | None = None,
+):
  
-    env_kwargs = dict(render_mode=None, rw_func=rwf, scenario=scenario_name)
+    env_kwargs = dict(
+        render_mode=None,
+        rw_func=rwf,
+        scenario=scenario_name,
+        enterprise_config_set=enterprise_config_set,
+        enterprise_fixed_config_key=enterprise_fixed_config_key,
+        enterprise_config_keys=enterprise_config_keys,
+    )
     register_env(
         "pettingzoo_cerere",
         lambda env_config: PettingZooEnv(cerere_net_v2.env(**env_kwargs)),
@@ -588,7 +618,7 @@ def train_model_with_tune(iterations, stop_rw, env_name, scenario_name, path2tar
     if not ray.is_initialized():
         ray.init(
             num_gpus=int(torch.cuda.is_available()),           
-            num_cpus=6,
+            num_cpus=16,
             include_dashboard=False,
             ignore_reinit_error=True,
             log_to_driver=False,
@@ -649,7 +679,9 @@ def eval_model(in_render_mode, in_scenario, path2tar, in_rwf):
         .environment("pettingzoo_cerere")
         .env_runners(
             create_env_on_local_worker=True,
-            num_env_runners=0,
+            num_env_runners=12,
+            num_envs_per_env_runner=1,
+            num_cpus_per_env_runner=1,
 #            env_to_module_connector=lambda env: (
 #                # `agent_ids=...`: Only flatten obs for the learning RLModule.
 #                FlattenObservations(multi_agent=True, agent_ids={"player_0"}),
@@ -968,7 +1000,11 @@ def eval_hmarl_forced_configs(
     eval_config = (
         PPOConfig()
         .environment("pettingzoo_cerere_hmarl")
-        .env_runners(num_env_runners=0)
+        .env_runners(
+            num_env_runners=12,
+            num_envs_per_env_runner=1,
+            num_cpus_per_env_runner=1,
+        )
         .multi_agent(
             policies=policies,
             policy_mapping_fn=policy_mapping_fn,
@@ -1398,7 +1434,17 @@ if __name__ == "__main__":
     elif args.trainWithTune:
         print("Train model with Tune in env %s, scenario %s" % (ENVIRONMENT, SCENARIO))
         start = datetime.datetime.now().replace(microsecond=0)
-        train_model_with_tune(args.iter, args.stop_rw, ENVIRONMENT, SCENARIO, args.path2tar, args.rwf)
+        train_model_with_tune(
+            args.iter,
+            args.stop_rw,
+            ENVIRONMENT,
+            SCENARIO,
+            args.path2tar,
+            args.rwf,
+            enterprise_config_set=(args.hmarl_config_set if SCENARIO == "enterprise" else None),
+            enterprise_fixed_config_key=None,
+            enterprise_config_keys=None,
+        )
         end = datetime.datetime.now().replace(microsecond=0)
         elapsed = end - start
         print("Stop train model with Tune in env %s after %s" % (ENVIRONMENT, elapsed))
