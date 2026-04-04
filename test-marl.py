@@ -242,7 +242,7 @@ def train_model(
 #            },
          )
         .env_runners(
-            num_env_runners=12,
+            num_env_runners=8,
             num_envs_per_env_runner=1,
             num_cpus_per_env_runner=1,
         )
@@ -379,7 +379,7 @@ def train_hmarl(
             kl_coeff=0.005,
         )
         .env_runners(
-            num_env_runners=12,
+            num_env_runners=8,
             num_envs_per_env_runner=1,
             num_cpus_per_env_runner=1,
         )
@@ -495,7 +495,7 @@ def eval_hmarl(
         PPOConfig()
         .environment("pettingzoo_cerere_hmarl")
         .env_runners(
-            num_env_runners=12,
+            num_env_runners=8,
             num_envs_per_env_runner=1,
             num_cpus_per_env_runner=1,
         )
@@ -624,7 +624,7 @@ def train_model_with_tune(
     if not ray.is_initialized():
         ray.init(
             num_gpus=int(torch.cuda.is_available()),           
-            num_cpus=16,
+            num_cpus=8,
             include_dashboard=False,
             ignore_reinit_error=True,
             log_to_driver=False,
@@ -685,7 +685,7 @@ def eval_model(in_render_mode, in_scenario, path2tar, in_rwf):
         .environment("pettingzoo_cerere")
         .env_runners(
             create_env_on_local_worker=True,
-            num_env_runners=12,
+            num_env_runners=8,
             num_envs_per_env_runner=1,
             num_cpus_per_env_runner=1,
         )
@@ -1008,7 +1008,7 @@ def eval_hmarl_forced_configs(
         PPOConfig()
         .environment("pettingzoo_cerere_hmarl")
         .env_runners(
-            num_env_runners=12,
+            num_env_runners=8,
             num_envs_per_env_runner=1,
             num_cpus_per_env_runner=1,
         )
