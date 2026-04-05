@@ -469,6 +469,8 @@ def getReward4(
     b: float = 1.0,
     c: float = 0.1,
     win_bonus_scale: float = 1.0,
+    leftover_warn_threshold: float = 0.40,
+    leftover_soft_penalty_scale: float = 0.5,
 ):
     """Dense reward shaping
 
@@ -507,8 +509,10 @@ def getReward4(
 
     topo_len = max(1, len(topology))
 
+    leftover_ratio = float(len(reachable) - reachable_infected_nodes) / float(topo_len)
+
     # Termination: leftover too small
-    if len(reachable) - reachable_infected_nodes < 0.25 * len(topology):
+    if leftover_ratio < 0.25:
         return -1.0, 1, reachable_healthy_nodes, reachable_infected_nodes, data_ex, "leftover_too_small", False
 
     # Defender win
@@ -517,10 +521,17 @@ def getReward4(
         return float(bonus), 1, reachable_healthy_nodes, reachable_infected_nodes, data_ex, "no_infected_in_subgraph", True
 
     invalid = 1.0 if int(pFlag) == 1 else 0.0
+    soft_leftover_penalty = 0.0
+    if leftover_ratio < float(leftover_warn_threshold):
+        soft_leftover_penalty = float(leftover_soft_penalty_scale) * (
+            float(leftover_warn_threshold) - leftover_ratio
+        )
+
     step_reward = (
         float(a) * (float(healthy_nodes_no_infected_subg) / float(topo_len))
         - float(b) * (float(reachable_infected_nodes) / float(topo_len))
         - float(c) * invalid
+        - soft_leftover_penalty
     )
 
     return float(step_reward), 0, reachable_healthy_nodes, reachable_infected_nodes, data_ex, None, False
