@@ -313,6 +313,8 @@ def train_hmarl(
     enterprise_config_keys: list[str] | None = None,
     shared_patch_policy: bool = False,
     min_iters: int = 0,
+    min_rw: float = float("-inf"),
+    min_save_iters: int = 0,
 ):
 
     env_kwargs = dict(
@@ -414,12 +416,27 @@ def train_hmarl(
     )
 
     algo = config.build_algo()
+    base_save_path = os.path.abspath(path2tar)
     print(f"Starting HMARL training for {iterations} iterations ...")
     last_mean = None
+    last_saved_mean_rw = float("-inf")
     for i in range(iterations):
         result = algo.train()
         last_mean = result[ENV_RUNNER_RESULTS][EPISODE_RETURN_MEAN]
         print(f"Iter: {i}, Reward mean: {last_mean}")
+
+        if (
+            (i + 1) >= int(min_save_iters)
+            and float(last_mean) >= float(min_rw)
+            and float(last_mean) >= float(last_saved_mean_rw)
+        ):
+            checkpoint_save_path = f"{base_save_path}_best_iter_{i + 1}"
+            checkpoint_path = algo.save(checkpoint_save_path)
+            last_saved_mean_rw = float(last_mean)
+            print(
+                f"HMARL model checkpoint saved at iter {i} with mean_rw={last_mean:.6f}: {checkpoint_path}"
+            )
+
         if last_mean >= stop_rw and (i + 1) < int(min_iters):
             print(
                 f"Reached stop_rw={stop_rw} at iter={i}, but min_iters={min_iters} not reached yet; continuing."
@@ -428,8 +445,13 @@ def train_hmarl(
             print(f"Reached episode return of {stop_rw} at iter {i} (min_iters={min_iters}) -> stopping")
             break
 
-    checkpoint_path = algo.save(os.path.abspath(path2tar))
-    print(f"HMARL model saved at {checkpoint_path}")
+    final_checkpoint_path = algo.save(base_save_path)
+    print(f"Final HMARL model checkpoint saved at {final_checkpoint_path}")
+
+    if last_saved_mean_rw == float("-inf"):
+        print(
+            "No best-checkpoint matched min-save criteria during training; only final checkpoint was saved."
+        )
 
 
 ###### Eval HMARL Begin
@@ -1374,11 +1396,23 @@ if __name__ == "__main__":
     parser.add_argument('--stop_rw', type=float, default=0.1,
                         help='Mean reward to stop the training (ent=0.64 ent/ mil=0.83 mil), default = 0.1')
     parser.add_argument(
+        '--min_rw',
+        type=float,
+        default=float('-inf'),
+        help='HMARL only: minimum mean reward required before a checkpoint can be saved. Default=-inf',
+    )
+    parser.add_argument(
         '--min_iters',
         type=int,
         default=0,
         help='Minimum number of training iterations before stop_rw early-stopping is allowed. Default=0',
     )                    
+    parser.add_argument(
+        '--min_save_iters',
+        type=int,
+        default=0,
+        help='HMARL only: minimum training iterations before checkpoint saving is allowed. Default=0',
+    )
     parser.add_argument('--rwf', type=int, default=1,
                         help='Used reward function (iso-patch=1/bt=2) , default = 1')   
     parser.add_argument('--eval_episodes', type=int, default=1,
@@ -1484,6 +1518,8 @@ if __name__ == "__main__":
             enterprise_config_keys=None,
             shared_patch_policy=bool(args.hmarl_shared_patch),
             min_iters=args.min_iters,
+            min_rw=args.min_rw,
+            min_save_iters=args.min_save_iters,
         )
         end = datetime.datetime.now().replace(microsecond=0)
         elapsed = end - start
