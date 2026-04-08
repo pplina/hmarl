@@ -567,7 +567,19 @@ class cerere_hmarl_env(AECEnv):
                 self.base_env.mystep = getattr(self.base_env, "mystep", 0) + 1
 
                 # Compute reward after defense
-                if self.base_env.rw_function == 4:
+                if self.base_env.rw_function == 5:
+                    rew, terminated2, *_rest = network.getReward5(
+                        self.base_env.critserver,
+                        self.base_env.optserver,
+                        self.base_env.topology,
+                        self.base_env.nwstate,
+                        int(pFlag),
+                        self.base_env.netgraph,
+                        int(action),
+                        self.base_env.actionSpace,
+                        self.base_env.block_traffic,
+                    )
+                elif self.base_env.rw_function == 4:
                     rew, terminated2, *_rest = network.getReward4(
                         self.base_env.critserver,
                         self.base_env.optserver,
