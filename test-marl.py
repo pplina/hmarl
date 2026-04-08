@@ -899,6 +899,19 @@ def eval_model2_forced_configs(
     enterprise_config_set: str | None = None,
 ):
 
+    def _safe_softmax(vec: np.ndarray) -> np.ndarray:
+        vec = np.asarray(vec, dtype=np.float64)
+        vec = np.where(np.isfinite(vec), vec, -1e9)
+        m = np.max(vec)
+        exps = np.exp(vec - m)
+        denom = np.sum(exps)
+        if not np.isfinite(denom) or denom <= 0:
+            return np.ones_like(vec, dtype=np.float64) / float(len(vec))
+        p = exps / denom
+        if not np.all(np.isfinite(p)) or np.any(p < 0) or np.sum(p) <= 0:
+            return np.ones_like(vec, dtype=np.float64) / float(len(vec))
+        return p
+
     env_kwargs = dict(
         render_mode=None,
         rw_func=in_rwf,
@@ -940,7 +953,7 @@ def eval_model2_forced_configs(
                     action = None
                 else:
                     if agent == env.possible_agents[0]:
-                        action = env.action_space(agent).sample()
+                        action = 1
                     else:
                         input_dict = {Columns.OBS: torch.from_numpy(observation).unsqueeze(0)}
                         out = rl_module.forward_inference(input_dict)
@@ -948,9 +961,10 @@ def eval_model2_forced_configs(
                         if deterministic:
                             action = int(np.argmax(logits))
                         else:
+                            probs = _safe_softmax(logits)
                             action = int(
                                 np.random.choice(
-                                    env.action_space(agent).n, p=softmax(logits)
+                                    env.action_space(agent).n, p=probs
                                 )
                             )
                 env.step(action)
